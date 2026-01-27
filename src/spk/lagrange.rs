@@ -1,0 +1,286 @@
+//! Lagrange polynomial interpolation for SPK Types 8 and 9.
+
+use crate::error::{Error, Result};
+use crate::state::State;
+use muad_dib::kernel::spk_types::{Spk8Data, Spk9Data, StateRecord};
+
+/// Lagrange interpolation at a point.
+fn lagrange_interpolate(x_values: &[f64], y_values: &[f64], x: f64) -> f64 {
+    let n = x_values.len();
+    debug_assert_eq!(n, y_values.len());
+
+    if n == 0 {
+        return 0.0;
+    }
+    if n == 1 {
+        return y_values[0];
+    }
+
+    let mut result = 0.0;
+    for i in 0..n {
+        let mut basis = 1.0;
+        for j in 0..n {
+            if i != j {
+                let denom = x_values[i] - x_values[j];
+                if denom.abs() > 1e-15 {
+                    basis *= (x - x_values[j]) / denom;
+                }
+            }
+        }
+        result += y_values[i] * basis;
+    }
+    result
+}
+
+/// Window selection for Type 8 (equally spaced).
+///
+/// Implements CSPICE algorithm: odd windows center on nearest epoch,
+/// even windows use lower bracket.
+#[allow(clippy::if_same_then_else)]
+fn select_window_type8(data: &Spk8Data, epoch: f64) -> Result<(usize, usize)> {
+    let n = data.states.len();
+    if n == 0 {
+        return Err(Error::EpochOutOfRange {
+            epoch,
+            start: data.start_epoch,
+            end: data.start_epoch,
+        });
+    }
+
+    let end_epoch = data.start_epoch + (n - 1) as f64 * data.step_size;
+    if epoch < data.start_epoch || epoch > end_epoch {
+        return Err(Error::EpochOutOfRange {
+            epoch,
+            start: data.start_epoch,
+            end: end_epoch,
+        });
+    }
+
+    let normalized = (epoch - data.start_epoch) / data.step_size;
+    let lower = normalized.floor() as usize;
+    let high = (lower + 1).min(n - 1);
+
+    let wndsiz = data.window_size as usize;
+    let degree = wndsiz - 1;
+
+    let first = if wndsiz % 2 == 1 {
+        let lower_epoch = data.start_epoch + lower as f64 * data.step_size;
+        let high_epoch = data.start_epoch + high as f64 * data.step_size;
+        let near = if lower == 0 {
+            lower
+        } else if high >= n {
+            lower
+        } else if (epoch - lower_epoch).abs() <= (high_epoch - epoch).abs() {
+            lower
+        } else {
+            high
+        };
+        let half = degree / 2;
+        if near < half {
+            0
+        } else if near > n - 1 - (degree - half) {
+            n - wndsiz
+        } else {
+            near - half
+        }
+    } else {
+        let half = degree / 2;
+        if lower < half {
+            0
+        } else if lower > n - 1 - (degree - half) {
+            n - wndsiz
+        } else {
+            lower - half
+        }
+    };
+
+    Ok((first, first + degree + 1))
+}
+
+/// Window selection for Type 9 (unequally spaced).
+#[allow(clippy::if_same_then_else)]
+fn select_window_type9(data: &Spk9Data, epoch: f64) -> Result<(usize, usize)> {
+    let n = data.states.len();
+    if n == 0 {
+        return Err(Error::EpochOutOfRange {
+            epoch,
+            start: 0.0,
+            end: 0.0,
+        });
+    }
+
+    let start_epoch = data.states.first().unwrap().epoch;
+    let end_epoch = data.states.last().unwrap().epoch;
+
+    if epoch < start_epoch || epoch > end_epoch {
+        return Err(Error::EpochOutOfRange {
+            epoch,
+            start: start_epoch,
+            end: end_epoch,
+        });
+    }
+
+    let mut lower = 0;
+    let mut upper = n - 1;
+    while upper - lower > 1 {
+        let mid = (lower + upper) / 2;
+        if data.states[mid].epoch <= epoch {
+            lower = mid;
+        } else {
+            upper = mid;
+        }
+    }
+    let high = lower + 1;
+
+    let wndsiz = data.window_size as usize;
+    let degree = wndsiz - 1;
+
+    let first = if wndsiz % 2 == 1 {
+        let near = if lower == 0 {
+            lower
+        } else if high >= n {
+            lower
+        } else if (epoch - data.states[lower].epoch).abs()
+            <= (data.states[high].epoch - epoch).abs()
+        {
+            lower
+        } else {
+            high
+        };
+        let half = degree / 2;
+        if near < half {
+            0
+        } else if near > n - 1 - (degree - half) {
+            n - wndsiz
+        } else {
+            near - half
+        }
+    } else {
+        let half = degree / 2;
+        if lower < half {
+            0
+        } else if lower > n - 1 - (degree - half) {
+            n - wndsiz
+        } else {
+            lower - half
+        }
+    };
+
+    Ok((first, first + degree + 1))
+}
+
+fn interpolate_component<F>(states: &[StateRecord], epochs: &[f64], epoch: f64, extractor: F) -> f64
+where
+    F: Fn(&StateRecord) -> f64,
+{
+    let values: Vec<f64> = states.iter().map(&extractor).collect();
+    lagrange_interpolate(epochs, &values, epoch)
+}
+
+/// Evaluate SPK Type 8 (Lagrange, equally spaced).
+pub fn evaluate_type8(data: &Spk8Data, epoch: f64) -> Result<State> {
+    let (start_idx, end_idx) = select_window_type8(data, epoch)?;
+    let window_states = &data.states[start_idx..end_idx];
+
+    let epochs: Vec<f64> = (start_idx..end_idx)
+        .map(|i| data.start_epoch + (i as f64) * data.step_size)
+        .collect();
+
+    let x = interpolate_component(window_states, &epochs, epoch, |s| s.x);
+    let y = interpolate_component(window_states, &epochs, epoch, |s| s.y);
+    let z = interpolate_component(window_states, &epochs, epoch, |s| s.z);
+    let vx = interpolate_component(window_states, &epochs, epoch, |s| s.vx);
+    let vy = interpolate_component(window_states, &epochs, epoch, |s| s.vy);
+    let vz = interpolate_component(window_states, &epochs, epoch, |s| s.vz);
+
+    Ok(State::new_raw([x, y, z], [vx, vy, vz]))
+}
+
+/// Evaluate SPK Type 9 (Lagrange, unequally spaced).
+pub fn evaluate_type9(data: &Spk9Data, epoch: f64) -> Result<State> {
+    let (start_idx, end_idx) = select_window_type9(data, epoch)?;
+    let window_states = &data.states[start_idx..end_idx];
+
+    let epochs: Vec<f64> = window_states.iter().map(|s| s.epoch).collect();
+
+    let x = interpolate_component(window_states, &epochs, epoch, |s| s.x);
+    let y = interpolate_component(window_states, &epochs, epoch, |s| s.y);
+    let z = interpolate_component(window_states, &epochs, epoch, |s| s.z);
+    let vx = interpolate_component(window_states, &epochs, epoch, |s| s.vx);
+    let vy = interpolate_component(window_states, &epochs, epoch, |s| s.vy);
+    let vz = interpolate_component(window_states, &epochs, epoch, |s| s.vz);
+
+    Ok(State::new_raw([x, y, z], [vx, vy, vz]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lagrange_linear() {
+        let x = [0.0, 1.0];
+        let y = [1.0, 3.0]; // y = 2x + 1
+        assert!((lagrange_interpolate(&x, &y, 0.5) - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_lagrange_quadratic() {
+        let x = [0.0, 1.0, 2.0];
+        let y = [0.0, 1.0, 4.0]; // y = x^2
+        assert!((lagrange_interpolate(&x, &y, 1.5) - 2.25).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_evaluate_type8() {
+        let data = Spk8Data {
+            start_epoch: 0.0,
+            step_size: 10.0,
+            window_size: 4,
+            states: (0..4)
+                .map(|i| StateRecord {
+                    epoch: (i * 10) as f64,
+                    x: (i * 10) as f64,
+                    y: 0.0,
+                    z: 0.0,
+                    vx: 1.0,
+                    vy: 0.0,
+                    vz: 0.0,
+                })
+                .collect(),
+        };
+
+        let state = evaluate_type8(&data, 15.0).unwrap();
+        assert!((state.position[0] - 15.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_evaluate_type9() {
+        let data = Spk9Data {
+            window_size: 4,
+            states: vec![
+                StateRecord { epoch: 0.0, x: 0.0, y: 0.0, z: 0.0, vx: 1.0, vy: 0.0, vz: 0.0 },
+                StateRecord { epoch: 5.0, x: 5.0, y: 0.0, z: 0.0, vx: 1.0, vy: 0.0, vz: 0.0 },
+                StateRecord { epoch: 15.0, x: 15.0, y: 0.0, z: 0.0, vx: 1.0, vy: 0.0, vz: 0.0 },
+                StateRecord { epoch: 30.0, x: 30.0, y: 0.0, z: 0.0, vx: 1.0, vy: 0.0, vz: 0.0 },
+            ],
+        };
+
+        let state = evaluate_type9(&data, 5.0).unwrap();
+        assert!((state.position[0] - 5.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_out_of_range() {
+        let data = Spk8Data {
+            start_epoch: 0.0,
+            step_size: 10.0,
+            window_size: 2,
+            states: vec![
+                StateRecord { epoch: 0.0, x: 0.0, y: 0.0, z: 0.0, vx: 0.0, vy: 0.0, vz: 0.0 },
+                StateRecord { epoch: 10.0, x: 10.0, y: 0.0, z: 0.0, vx: 0.0, vy: 0.0, vz: 0.0 },
+            ],
+        };
+        assert!(matches!(evaluate_type8(&data, -5.0), Err(Error::EpochOutOfRange { .. })));
+    }
+}
