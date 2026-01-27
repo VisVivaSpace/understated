@@ -3,7 +3,6 @@
 //! Dispatches to the correct algorithm based on CK segment type.
 
 pub mod evaluate;
-pub mod slerp;
 
 use crate::error::{Error, Result};
 use crate::pointing::Pointing;

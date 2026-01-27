@@ -16,7 +16,7 @@
 //!
 //! **CK (attitude):**
 //! - Type 1: Discrete pointing (nearest record)
-//! - Type 3: SLERP quaternion interpolation
+//! - Type 3: Linear interpolation (rotation matrix, axis-angle; matches CSPICE CKE03)
 
 pub mod error;
 pub mod types;
@@ -25,6 +25,7 @@ pub mod pointing;
 pub mod coord;
 pub mod time;
 pub mod lsk;
+pub mod rotation;
 pub mod spk;
 pub mod ck;
 pub mod ephemeris;

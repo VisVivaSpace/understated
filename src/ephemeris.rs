@@ -91,7 +91,7 @@ impl Ephemeris {
         let view = self.kernel.ck_view(segment);
         let data = view.data();
         let mut pointing = evaluate_ck(data, sclk_ticks)?;
-        pointing.frame = segment.frame_code;
+        pointing.frame = segment.frame_code.0;
 
         Ok(pointing)
     }

@@ -103,15 +103,15 @@ mod tests {
         let manual = moon_rel_emb - earth_rel_emb;
 
         for i in 0..3 {
-            assert!(
-                (moon_rel_earth.position[i] - manual.position[i]).abs() < 1e-6,
+            assert_eq!(
+                moon_rel_earth.position[i], manual.position[i],
                 "Position[{}] mismatch: {} vs {}",
                 i,
                 moon_rel_earth.position[i],
                 manual.position[i]
             );
-            assert!(
-                (moon_rel_earth.velocity[i] - manual.velocity[i]).abs() < 1e-9,
+            assert_eq!(
+                moon_rel_earth.velocity[i], manual.velocity[i],
                 "Velocity[{}] mismatch: {} vs {}",
                 i,
                 moon_rel_earth.velocity[i],

@@ -209,8 +209,8 @@ mod tests {
         let period = 2.0 * PI * (r * r * r / EARTH_GM).sqrt();
 
         let state = propagate(r0, v0, EARTH_GM, period);
-        assert!((state.position[0] - r).abs() < 1.0);
-        assert!(state.position[1].abs() < 1.0);
+        assert!((state.position[0] - r).abs() < 1e-9);
+        assert!(state.position[1].abs() < 1e-9);
     }
 
     #[test]

@@ -255,7 +255,7 @@ mod tests {
         };
 
         let state = evaluate_type8(&data, 15.0).unwrap();
-        assert!((state.position[0] - 15.0).abs() < 1e-6);
+        assert!((state.position[0] - 15.0).abs() < 1e-12);
     }
 
     #[test]
@@ -272,7 +272,7 @@ mod tests {
         };
 
         let state = evaluate_type9(&data, 5.0).unwrap();
-        assert!((state.position[0] - 5.0).abs() < 1e-6);
+        assert!((state.position[0] - 5.0).abs() < 1e-12);
     }
 
     #[test]

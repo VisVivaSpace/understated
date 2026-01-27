@@ -205,11 +205,11 @@ mod tests {
         };
 
         let state = evaluate_type2(&data, 50.0).unwrap();
-        assert!((state.position[0] - 1000.0).abs() < 1e-6);
+        assert!((state.position[0] - 1000.0).abs() < 1e-14);
 
         let state = evaluate_type2(&data, 100.0).unwrap();
-        assert!((state.position[0] - 1010.0).abs() < 1e-6);
-        assert!((state.velocity[0] - 0.2).abs() < 1e-6); // 10 / 50
+        assert!((state.position[0] - 1010.0).abs() < 1e-14);
+        assert!((state.velocity[0] - 0.2).abs() < 1e-14); // 10 / 50
     }
 
     #[test]
@@ -249,7 +249,7 @@ mod tests {
         };
 
         let state = evaluate_type3(&data, 50.0).unwrap();
-        assert!((state.position[0] - 1000.0).abs() < 1e-6);
-        assert!((state.velocity[0] - 1.0).abs() < 1e-6);
+        assert!((state.position[0] - 1000.0).abs() < 1e-14);
+        assert!((state.velocity[0] - 1.0).abs() < 1e-14);
     }
 }

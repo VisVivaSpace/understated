@@ -232,10 +232,10 @@ mod tests {
         };
 
         let state = evaluate_type13(&data, 0.0).unwrap();
-        assert!((state.position[0] - 0.0).abs() < 1e-6);
+        assert!((state.position[0] - 0.0).abs() < 1e-12);
 
         let state = evaluate_type13(&data, 5.0).unwrap();
-        assert!((state.position[0] - 5.0).abs() < 1e-6);
+        assert!((state.position[0] - 5.0).abs() < 1e-12);
     }
 
     #[test]

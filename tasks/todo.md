@@ -54,6 +54,41 @@
 - [x] Create notes/muad_dib_dependencies.md
 - [x] Create README.md
 
+## Phase 8: CK Algorithm Fix + Test Tolerance Audit
+
+### Findings
+
+**CK Type 3 — algorithm mismatch (root cause of test failure):**
+- understated uses quaternion SLERP
+- CSPICE CKE03 uses rotation-matrix axis-angle interpolation:
+  q→R, relative rotation, extract axis-angle, partial rotation, compose
+- Both are geodesic interpolation on SO(3), different floating-point paths
+- Measured: max 6.274e-10 in rotation matrix elements (midpoint)
+- At data records: exact match (0.0). Angular velocity: exact (2.7e-20)
+
+**Time — tolerance too loose:**
+- `test_str2et_vs_cspice` uses 1e-6 but actual max diff is 6.2e-11
+- `test_et2utc_vs_cspice` — all strings match exactly
+
+**SPK — already at machine precision (no changes needed):**
+- Type 2: 7.5e-9 km pos (relative ~7.5e-17), 3.6e-15 km/s vel
+- Type 9: 1.8e-12 km, 1.8e-15 km/s
+- Type 13: 9.1e-13 km, 1.3e-14 km/s
+
+### Tasks
+
+- [ ] Add rotation matrix utilities in `src/rotation.rs`:
+      q2m, m2q (Shepperd), raxisa, axisar, mtxm, mxmt
+- [ ] Rewrite CK Type 3 `evaluate_type3()` to match CKE03 algorithm
+- [ ] Tighten `test_str2et_vs_cspice` tolerance from 1e-6 → 1e-9
+- [ ] Tighten `test_ck_vs_cspice` tolerance (expect machine precision)
+- [ ] Delete diagnostic `tests/tolerance_audit.rs`
+- [ ] Verify: `cargo test --features cspice,test-data` all pass
+- [ ] Verify: `cargo clippy` clean
+
+**DO NOT modify:** `src/state.rs`, `src/spk/*.rs`, `src/pointing.rs`,
+`src/time.rs`, `src/lsk.rs`, any muad-dib files
+
 ## Review
 
 ### Phase 7 Summary

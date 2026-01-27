@@ -1,23 +1,29 @@
-//! CK Type 1 (discrete) and Type 3 (SLERP interpolated) evaluation.
+//! CK Type 1 (discrete) and Type 3 (linear interpolation) evaluation.
+//!
+//! Type 3 evaluation matches CSPICE's CKE03 algorithm: rotation matrix
+//! interpolation via axis-angle decomposition, not quaternion SLERP.
 
-use crate::ck::slerp::slerp;
 use crate::error::{Error, Result};
 use crate::pointing::Pointing;
+use crate::rotation::{axisar, m2q, mtxm, mxmt, q2m};
 use muad_dib::kernel::ck_types::{Ck1Data, Ck3Data, PointingRecord};
 
 /// Linear interpolation of angular velocity between two records.
+///
+/// Matches CSPICE CKE03: `AV = (1 - frac) * AV1 + frac * AV2`.
 fn interpolate_angular_velocity(
     rec0: &PointingRecord,
     rec1: &PointingRecord,
-    t: f64,
+    frac: f64,
 ) -> Option<[f64; 3]> {
-    let av0 = rec0.angular_velocity()?;
-    let av1 = rec1.angular_velocity()?;
+    let av0 = rec0.angular_velocity?;
+    let av1 = rec1.angular_velocity?;
+    let w0 = 1.0 - frac;
 
     Some([
-        av0[0] + t * (av1[0] - av0[0]),
-        av0[1] + t * (av1[1] - av0[1]),
-        av0[2] + t * (av1[2] - av0[2]),
+        w0 * av0[0] + frac * av1[0],
+        w0 * av0[1] + frac * av1[1],
+        w0 * av0[2] + frac * av1[2],
     ])
 }
 
@@ -49,11 +55,19 @@ pub fn evaluate_type1(data: &Ck1Data, sclk: f64) -> Result<Pointing> {
     let record = &data.records[idx];
     Ok(Pointing::new_raw(
         record.quaternion(),
-        record.angular_velocity(),
+        record.angular_velocity,
     ))
 }
 
-/// Evaluate CK Type 3: SLERP interpolation between bracketing records.
+/// Evaluate CK Type 3: linear interpolation between bracketing records.
+///
+/// Matches CSPICE's CKE03 algorithm:
+/// 1. Convert bracketing quaternions to rotation matrices
+/// 2. Compute relative rotation: `ROT = CMAT2^T * CMAT1`
+/// 3. Extract rotation axis and angle
+/// 4. Build partial rotation: `DELTA = axisar(axis, angle * frac)`
+/// 5. Compose: `CMAT = CMAT1 * DELTA^T`
+/// 6. Convert result back to quaternion
 pub fn evaluate_type3(data: &Ck3Data, sclk: f64) -> Result<Pointing> {
     if data.records.is_empty() {
         return Err(Error::EpochOutOfRange {
@@ -84,36 +98,44 @@ pub fn evaluate_type3(data: &Ck3Data, sclk: f64) -> Result<Pointing> {
         }
     }
 
-    // Exact match
-    if (data.records[lower_idx].sclk - sclk).abs() < 1e-10 {
-        let record = &data.records[lower_idx];
-        return Ok(Pointing::new_raw(
-            record.quaternion(),
-            record.angular_velocity(),
-        ));
-    }
-
-    let upper_idx = (lower_idx + 1).min(data.records.len() - 1);
-    if upper_idx == lower_idx {
-        let record = &data.records[lower_idx];
-        return Ok(Pointing::new_raw(
-            record.quaternion(),
-            record.angular_velocity(),
-        ));
-    }
-
     let rec0 = &data.records[lower_idx];
+
+    // CKE03: when t1 == t2 (same record or exact match), just convert and return.
+    let upper_idx = (lower_idx + 1).min(data.records.len() - 1);
     let rec1 = &data.records[upper_idx];
 
-    let dt = rec1.sclk - rec0.sclk;
-    let t = if dt.abs() < 1e-15 {
-        0.0
-    } else {
-        (sclk - rec0.sclk) / dt
-    };
+    if rec0.sclk == rec1.sclk || upper_idx == lower_idx {
+        // Single record — convert quaternion directly via q2m → m2q
+        // to match the CSPICE path (which always goes through q2m).
+        let cmat = q2m(&rec0.quaternion());
+        let q = m2q(&cmat);
+        return Ok(Pointing::new_raw(q, rec0.angular_velocity));
+    }
 
-    let q = slerp(&rec0.quaternion(), &rec1.quaternion(), t);
-    let av = interpolate_angular_velocity(rec0, rec1, t);
+    // Interpolation parameter
+    let frac = (sclk - rec0.sclk) / (rec1.sclk - rec0.sclk);
+
+    // Step 1: Convert quaternions to C-matrices
+    let cmat1 = q2m(&rec0.quaternion());
+    let cmat2 = q2m(&rec1.quaternion());
+
+    // Step 2: Relative rotation ROT = CMAT2^T * CMAT1
+    let rot = mtxm(&cmat2, &cmat1);
+
+    // Step 3: Extract axis and angle
+    let (axis, angle) = crate::rotation::raxisa(&rot);
+
+    // Step 4: Partial rotation DELTA = axisar(axis, angle * frac)
+    let delta = axisar(&axis, angle * frac);
+
+    // Step 5: Compose CMAT = CMAT1 * DELTA^T
+    let cmat = mxmt(&cmat1, &delta);
+
+    // Step 6: Convert back to quaternion
+    let q = m2q(&cmat);
+
+    // Angular velocity: weighted average (same as CSPICE CKE03)
+    let av = interpolate_angular_velocity(rec0, rec1, frac);
 
     Ok(Pointing::new_raw(q, av))
 }
@@ -121,33 +143,30 @@ pub fn evaluate_type3(data: &Ck3Data, sclk: f64) -> Result<Pointing> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::f64::consts::PI;
+    use std::f64::consts::FRAC_1_SQRT_2;
+
+    fn make_record(sclk: f64, q: [f64; 4], av: Option<[f64; 3]>) -> PointingRecord {
+        PointingRecord {
+            sclk,
+            q0: q[0],
+            q1: q[1],
+            q2: q[2],
+            q3: q[3],
+            angular_velocity: av,
+        }
+    }
 
     #[test]
     fn test_evaluate_type1() {
         let data = Ck1Data {
             has_rates: true,
             records: vec![
-                PointingRecord {
-                    sclk: 100.0,
-                    q0: 1.0,
-                    q1: 0.0,
-                    q2: 0.0,
-                    q3: 0.0,
-                    av_x: Some(0.0),
-                    av_y: Some(0.0),
-                    av_z: Some(0.1),
-                },
-                PointingRecord {
-                    sclk: 200.0,
-                    q0: 0.707,
-                    q1: 0.707,
-                    q2: 0.0,
-                    q3: 0.0,
-                    av_x: Some(0.0),
-                    av_y: Some(0.0),
-                    av_z: Some(0.2),
-                },
+                make_record(100.0, [1.0, 0.0, 0.0, 0.0], Some([0.0, 0.0, 0.1])),
+                make_record(
+                    200.0,
+                    [FRAC_1_SQRT_2, FRAC_1_SQRT_2, 0.0, 0.0],
+                    Some([0.0, 0.0, 0.2]),
+                ),
             ],
         };
 
@@ -161,64 +180,66 @@ mod tests {
 
         // At second record
         let p = evaluate_type1(&data, 200.0).unwrap();
-        assert!((p.quaternion[0] - 0.707).abs() < 1e-6);
+        assert!((p.quaternion[0] - FRAC_1_SQRT_2).abs() < 1e-14);
     }
 
     #[test]
-    fn test_evaluate_type3() {
+    fn test_evaluate_type3_exact_match() {
         let data = Ck3Data {
             has_rates: false,
             records: vec![
-                PointingRecord {
-                    sclk: 100.0,
-                    q0: 1.0,
-                    q1: 0.0,
-                    q2: 0.0,
-                    q3: 0.0,
-                    av_x: None,
-                    av_y: None,
-                    av_z: None,
-                },
-                PointingRecord {
-                    sclk: 200.0,
-                    q0: 0.0,
-                    q1: 1.0,
-                    q2: 0.0,
-                    q3: 0.0,
-                    av_x: None,
-                    av_y: None,
-                    av_z: None,
-                },
+                make_record(100.0, [1.0, 0.0, 0.0, 0.0], None),
+                make_record(200.0, [0.0, 1.0, 0.0, 0.0], None),
             ],
             interval_starts: vec![0],
         };
 
-        // At first record
+        // At first record: q2m → m2q roundtrip preserves identity quaternion
         let p = evaluate_type3(&data, 100.0).unwrap();
-        assert!((p.quaternion[0] - 1.0).abs() < 1e-10);
+        assert!((p.quaternion[0] - 1.0).abs() < 1e-14);
+    }
 
-        // At midpoint - SLERP
+    #[test]
+    fn test_evaluate_type3_midpoint() {
+        // Identity and 180° rotation about x-axis
+        let data = Ck3Data {
+            has_rates: false,
+            records: vec![
+                make_record(100.0, [1.0, 0.0, 0.0, 0.0], None),
+                make_record(200.0, [0.0, 1.0, 0.0, 0.0], None),
+            ],
+            interval_starts: vec![0],
+        };
+
+        // At midpoint: should be a 90° rotation about x-axis
         let p = evaluate_type3(&data, 150.0).unwrap();
-        let expected = (PI / 4.0).cos();
-        assert!((p.quaternion[0] - expected).abs() < 1e-6);
+        // Expected quaternion for 90° about x: (cos(45°), sin(45°), 0, 0)
+        let expected_q0 = FRAC_1_SQRT_2;
+        let expected_q1 = FRAC_1_SQRT_2;
+        assert!(
+            (p.quaternion[0] - expected_q0).abs() < 1e-14,
+            "q0: {} vs {}",
+            p.quaternion[0],
+            expected_q0
+        );
+        assert!(
+            (p.quaternion[1] - expected_q1).abs() < 1e-14,
+            "q1: {} vs {}",
+            p.quaternion[1],
+            expected_q1
+        );
     }
 
     #[test]
     fn test_evaluate_type3_out_of_range() {
         let data = Ck3Data {
             has_rates: false,
-            records: vec![PointingRecord {
-                sclk: 100.0,
-                q0: 1.0,
-                q1: 0.0,
-                q2: 0.0,
-                q3: 0.0,
-                av_x: None,
-                av_y: None,
-                av_z: None,
-            }],
+            records: vec![make_record(100.0, [1.0, 0.0, 0.0, 0.0], None)],
             interval_starts: vec![0],
         };
-        assert!(matches!(evaluate_type3(&data, 50.0), Err(Error::EpochOutOfRange { .. })));
+        assert!(matches!(
+            evaluate_type3(&data, 50.0),
+            Err(Error::EpochOutOfRange { .. })
+        ));
     }
 }

@@ -80,9 +80,9 @@ fn evaluate_body(kernel: &SpiceKernel, body: NaifId, epoch: EpochTDB) -> Result<
     let data = view.data();
     let mut state = evaluate_spk(data, epoch_f)?;
 
-    state.target = NaifId(segment.target_code);
-    state.center = NaifId(segment.center_code);
-    state.frame = segment.frame_code;
+    state.target = NaifId::from(segment.target_code);
+    state.center = NaifId::from(segment.center_code);
+    state.frame = segment.frame_code.0;
 
     Ok(state)
 }
@@ -99,7 +99,7 @@ fn center_chain(kernel: &SpiceKernel, body: NaifId, epoch: f64) -> Vec<NaifId> {
             .find(|seg| seg.initial_epoch <= epoch && epoch <= seg.final_epoch);
         match seg {
             Some(s) => {
-                let center = NaifId(s.center_code);
+                let center = NaifId::from(s.center_code);
                 chain.push(center);
                 if center.0 == SSB {
                     break;

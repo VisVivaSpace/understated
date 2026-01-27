@@ -313,7 +313,7 @@ fn test_spk_type9_lagrange_vs_cspice() {
     let center_code = seg.center_code;
 
     // CSPICE
-    let cspice_state = spkez(target.0, mid_epoch, center_code);
+    let cspice_state = spkez(target.0, mid_epoch, center_code.0);
     if check_cspice_error() {
         // Skip if CSPICE can't handle this file
         return;
@@ -321,7 +321,7 @@ fn test_spk_type9_lagrange_vs_cspice() {
 
     // understated
     let us_state = eph
-        .state_of(target, EpochTDB(mid_epoch), NaifId(center_code))
+        .state_of(target, EpochTDB(mid_epoch), NaifId::from(center_code))
         .unwrap();
 
     for i in 0..3 {
@@ -368,14 +368,14 @@ fn test_spk_type13_hermite_vs_cspice() {
     let center_code = seg.center_code;
 
     // CSPICE
-    let cspice_state = spkez(target.0, mid_epoch, center_code);
+    let cspice_state = spkez(target.0, mid_epoch, center_code.0);
     if check_cspice_error() {
         return;
     }
 
     // understated
     let us_state = eph
-        .state_of(target, EpochTDB(mid_epoch), NaifId(center_code))
+        .state_of(target, EpochTDB(mid_epoch), NaifId::from(center_code))
         .unwrap();
 
     for i in 0..3 {
@@ -452,8 +452,10 @@ fn test_ck_vs_cspice() {
     let sign = if dot < 0.0 { -1.0 } else { 1.0 };
     for i in 0..4 {
         let diff = (us_pointing.quaternion[i] - sign * cspice_q[i]).abs();
+        // Both paths use identical CKE03 algorithm (rotation matrix axis-angle
+        // interpolation) followed by m2q. Machine precision expected.
         assert!(
-            diff < 1e-8,
+            diff < 1e-14,
             "Quaternion[{}] mismatch: understated={}, cspice={}, diff={}",
             i, us_pointing.quaternion[i], cspice_q[i], diff
         );
@@ -464,7 +466,7 @@ fn test_ck_vs_cspice() {
         for i in 0..3 {
             let diff = (us_av[i] - cspice_av[i]).abs();
             assert!(
-                diff < 1e-8,
+                diff < 1e-14,
                 "AngVel[{}] mismatch: understated={}, cspice={}, diff={}",
                 i, us_av[i], cspice_av[i], diff
             );
@@ -503,7 +505,7 @@ fn test_str2et_vs_cspice() {
 
         let diff = (us_et.0 - cspice_et).abs();
         assert!(
-            diff < 0.01, // 10 ms tolerance for UTC→TDB (our LSK extraction may differ slightly)
+            diff < 1e-9, // Sub-nanosecond: both use identical deltet() algorithm
             "str2et mismatch for '{}': understated={}, cspice={}, diff={}s",
             date, us_et.0, cspice_et, diff
         );
@@ -530,12 +532,10 @@ fn test_et2utc_vs_cspice() {
         // understated
         let us_utc = eph.tdb_to_utc(EpochTDB(epoch), TimeFormat::Iso8601).unwrap();
 
-        // Compare year-month-day portion (time may differ slightly)
-        let cspice_date = &cspice_utc[..10];
-        let us_date = &us_utc[..10];
+        // Compare full UTC strings (both should agree to millisecond precision)
         assert_eq!(
-            cspice_date, us_date,
-            "Date mismatch at epoch {}: understated='{}', cspice='{}'",
+            us_utc, cspice_utc,
+            "UTC mismatch at epoch {}: understated='{}', cspice='{}'",
             epoch, us_utc, cspice_utc
         );
     }
