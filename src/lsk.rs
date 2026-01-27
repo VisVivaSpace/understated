@@ -10,7 +10,7 @@
 //!      +dAT  +32.184s  +periodic
 //! ```
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::time::{format_calendar, format_iso8601, TimeFormat};
 use crate::types::EpochTDB;
 
@@ -105,6 +105,6 @@ pub fn extract_lsk(kernel: &muad_dib::kernel::SpiceKernel) -> Result<LeapSecondD
 
     kernel
         .lsk_data()
-        .ok_or(Error::MissingLskData)
         .map(LeapSecondData::from)
+        .map_err(Into::into)
 }
