@@ -143,8 +143,9 @@ fn select_window(data: &Spk13Data, epoch: f64) -> Result<(usize, usize)> {
     }
     let high = lower + 1;
 
-    let wndsiz = data.window_size as usize;
-    let degree = wndsiz - 1;
+    // CSPICE stores the polynomial degree, not the window size.
+    let degree = data.window_size as usize;
+    let wndsiz = degree + 1;
 
     let first = if wndsiz % 2 == 1 {
         let near = if lower == 0 {
@@ -221,8 +222,9 @@ mod tests {
 
     #[test]
     fn test_evaluate_type13_at_data_points() {
+        // window_size=1 means degree 1 (linear), so 2 points
         let data = Spk13Data {
-            window_size: 2,
+            window_size: 1,
             states: vec![
                 StateRecord { epoch: 0.0, x: 0.0, y: 0.0, z: 0.0, vx: 1.0, vy: 0.0, vz: 0.0 },
                 StateRecord { epoch: 10.0, x: 10.0, y: 0.0, z: 0.0, vx: 1.0, vy: 0.0, vz: 0.0 },
@@ -238,8 +240,9 @@ mod tests {
 
     #[test]
     fn test_out_of_range() {
+        // window_size=1 means degree 1, so 2 points
         let data = Spk13Data {
-            window_size: 2,
+            window_size: 1,
             states: vec![
                 StateRecord { epoch: 10.0, x: 0.0, y: 0.0, z: 0.0, vx: 0.0, vy: 0.0, vz: 0.0 },
                 StateRecord { epoch: 20.0, x: 10.0, y: 0.0, z: 0.0, vx: 0.0, vy: 0.0, vz: 0.0 },

@@ -4,8 +4,12 @@
 //! may only contain A relative to some intermediate center C. This module
 //! chains through the SPK segment hierarchy to compute arbitrary pairings.
 //!
-//! The algorithm computes both bodies relative to SSB (the root of the
-//! SPK tree), then subtracts: `state(A, B) = state(A, SSB) - state(B, SSB)`.
+//! Strategy:
+//! 1. If the target's segment center matches the requested center, return directly.
+//! 2. Otherwise, find the nearest common ancestor in the SPK tree and
+//!    chain both bodies to that ancestor, then subtract:
+//!    `state(A, B) = state(A, ancestor) - state(B, ancestor)`.
+//!    This minimizes floating-point error by avoiding unnecessary SSB round-trips.
 
 use crate::error::{Error, Result};
 use crate::spk::evaluate_spk;
@@ -29,37 +33,41 @@ pub fn state_of(
         return Ok(State::new(target, center, 1, [0.0; 3], [0.0; 3]));
     }
 
-    // Compute target relative to SSB
-    let target_ssb = state_relative_to_ssb(kernel, target, epoch)?;
+    // First, try the direct path: evaluate target's segment and check
+    // if its center matches the requested center.
+    let state = evaluate_body(kernel, target, epoch)?;
 
-    // If center is SSB, we're done
-    if center.0 == SSB {
-        return Ok(target_ssb);
+    if state.center == center {
+        return Ok(state);
     }
 
-    // Compute center relative to SSB
-    let center_ssb = state_relative_to_ssb(kernel, center, epoch)?;
+    // If the segment's center is the target we want (reversed query),
+    // just negate.
+    if state.target == center {
+        return Ok(-state);
+    }
 
-    // target rel center = (target rel SSB) - (center rel SSB)
-    Ok(target_ssb - center_ssb)
+    // Find common ancestor to minimize chaining depth and
+    // accumulation of floating-point errors.
+    let ancestor = find_common_ancestor(kernel, target, center, epoch);
+
+    let target_anc = chain_to(kernel, target, epoch, ancestor)?;
+
+    if center == ancestor {
+        return Ok(target_anc);
+    }
+
+    let center_anc = chain_to(kernel, center, epoch, ancestor)?;
+
+    // target rel center = (target rel ancestor) - (center rel ancestor)
+    Ok(target_anc - center_anc)
 }
 
-/// Compute the state of a body relative to the Solar System Barycenter (SSB).
-///
-/// Follows the SPK segment chain upward: body → segment_center → ... → SSB.
-fn state_relative_to_ssb(
-    kernel: &SpiceKernel,
-    body: NaifId,
-    epoch: EpochTDB,
-) -> Result<State> {
-    if body.0 == SSB {
-        return Ok(State::new(NaifId(SSB), NaifId(SSB), 1, [0.0; 3], [0.0; 3]));
-    }
-
+/// Evaluate a single segment for the given body and apply context.
+fn evaluate_body(kernel: &SpiceKernel, body: NaifId, epoch: EpochTDB) -> Result<State> {
     let md_body = muad_dib::types::NaifId(body.0);
     let epoch_f = epoch.0;
 
-    // Find a segment for this body
     let segment = kernel
         .spk_segments_for(md_body)
         .find(|seg| seg.initial_epoch <= epoch_f && epoch_f <= seg.final_epoch)
@@ -68,7 +76,6 @@ fn state_relative_to_ssb(
             epoch: epoch_f,
         })?;
 
-    // Evaluate the segment
     let view = kernel.spk_view(segment);
     let data = view.data();
     let mut state = evaluate_spk(data, epoch_f)?;
@@ -77,15 +84,76 @@ fn state_relative_to_ssb(
     state.center = NaifId(segment.center_code);
     state.frame = segment.frame_code;
 
-    // If segment center is SSB, done
-    if segment.center_code == SSB {
+    Ok(state)
+}
+
+/// Walk the center chain for a body, returning the list of center body IDs.
+fn center_chain(kernel: &SpiceKernel, body: NaifId, epoch: f64) -> Vec<NaifId> {
+    let mut chain = vec![body];
+    let mut current = body;
+    for _ in 0..20 {
+        // Safety limit to prevent infinite loops
+        let md_body = muad_dib::types::NaifId(current.0);
+        let seg = kernel
+            .spk_segments_for(md_body)
+            .find(|seg| seg.initial_epoch <= epoch && epoch <= seg.final_epoch);
+        match seg {
+            Some(s) => {
+                let center = NaifId(s.center_code);
+                chain.push(center);
+                if center.0 == SSB {
+                    break;
+                }
+                current = center;
+            }
+            None => break,
+        }
+    }
+    chain
+}
+
+/// Find the nearest common ancestor of two bodies in the SPK segment tree.
+/// Falls back to SSB if no closer ancestor is found.
+fn find_common_ancestor(
+    kernel: &SpiceKernel,
+    target: NaifId,
+    center: NaifId,
+    epoch: EpochTDB,
+) -> NaifId {
+    let target_chain = center_chain(kernel, target, epoch.0);
+    let center_chain = center_chain(kernel, center, epoch.0);
+
+    // Find the first body in target's chain that also appears in center's chain
+    for &body in &target_chain {
+        if center_chain.contains(&body) {
+            return body;
+        }
+    }
+
+    NaifId(SSB)
+}
+
+/// Compute the state of a body relative to `ancestor` by following the segment chain.
+fn chain_to(
+    kernel: &SpiceKernel,
+    body: NaifId,
+    epoch: EpochTDB,
+    ancestor: NaifId,
+) -> Result<State> {
+    if body == ancestor {
+        return Ok(State::new(body, ancestor, 1, [0.0; 3], [0.0; 3]));
+    }
+
+    let state = evaluate_body(kernel, body, epoch)?;
+
+    if state.center == ancestor {
         return Ok(state);
     }
 
-    // Otherwise, chain upward: get segment_center relative to SSB
-    let parent = state_relative_to_ssb(kernel, NaifId(segment.center_code), epoch)?;
+    // Chain upward: get segment_center relative to ancestor
+    let parent = chain_to(kernel, state.center, epoch, ancestor)?;
 
-    // parent = (seg_center rel SSB), state = (body rel seg_center)
-    // result = (SSB → seg_center) + (seg_center → body) = (SSB → body)
+    // parent = (seg_center rel ancestor), state = (body rel seg_center)
+    // result = (ancestor → seg_center) + (seg_center → body) = (ancestor → body)
     Ok(parent + state)
 }

@@ -60,8 +60,10 @@ fn select_window_type8(data: &Spk8Data, epoch: f64) -> Result<(usize, usize)> {
     let lower = normalized.floor() as usize;
     let high = (lower + 1).min(n - 1);
 
-    let wndsiz = data.window_size as usize;
-    let degree = wndsiz - 1;
+    // CSPICE stores the polynomial degree, not the window size.
+    // wndsiz (number of points) = degree + 1.
+    let degree = data.window_size as usize;
+    let wndsiz = degree + 1;
 
     let first = if wndsiz % 2 == 1 {
         let lower_epoch = data.start_epoch + lower as f64 * data.step_size;
@@ -132,8 +134,9 @@ fn select_window_type9(data: &Spk9Data, epoch: f64) -> Result<(usize, usize)> {
     }
     let high = lower + 1;
 
-    let wndsiz = data.window_size as usize;
-    let degree = wndsiz - 1;
+    // CSPICE stores the polynomial degree, not the window size.
+    let degree = data.window_size as usize;
+    let wndsiz = degree + 1;
 
     let first = if wndsiz % 2 == 1 {
         let near = if lower == 0 {
@@ -233,10 +236,11 @@ mod tests {
 
     #[test]
     fn test_evaluate_type8() {
+        // window_size=3 means degree 3 (cubic), so 4 points needed
         let data = Spk8Data {
             start_epoch: 0.0,
             step_size: 10.0,
-            window_size: 4,
+            window_size: 3,
             states: (0..4)
                 .map(|i| StateRecord {
                     epoch: (i * 10) as f64,
@@ -256,8 +260,9 @@ mod tests {
 
     #[test]
     fn test_evaluate_type9() {
+        // window_size=3 means degree 3 (cubic), so 4 points needed
         let data = Spk9Data {
-            window_size: 4,
+            window_size: 3,
             states: vec![
                 StateRecord { epoch: 0.0, x: 0.0, y: 0.0, z: 0.0, vx: 1.0, vy: 0.0, vz: 0.0 },
                 StateRecord { epoch: 5.0, x: 5.0, y: 0.0, z: 0.0, vx: 1.0, vy: 0.0, vz: 0.0 },
@@ -275,7 +280,7 @@ mod tests {
         let data = Spk8Data {
             start_epoch: 0.0,
             step_size: 10.0,
-            window_size: 2,
+            window_size: 1,
             states: vec![
                 StateRecord { epoch: 0.0, x: 0.0, y: 0.0, z: 0.0, vx: 0.0, vy: 0.0, vz: 0.0 },
                 StateRecord { epoch: 10.0, x: 10.0, y: 0.0, z: 0.0, vx: 0.0, vy: 0.0, vz: 0.0 },
