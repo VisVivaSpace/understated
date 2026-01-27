@@ -1,1 +1,7 @@
 /target
+.DS_Store
+/notes
+/.claude
+CLAUDE.md
+Cargo.lock
+
