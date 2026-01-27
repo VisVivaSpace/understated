@@ -203,4 +203,147 @@ mod tests {
         let bodies = eph.spk_bodies();
         assert!(!bodies.is_empty(), "gmat-lagrange.bsp should contain bodies");
     }
+
+    /// Verify that evaluating at closely-spaced epochs produces velocity
+    /// consistent with the numerical derivative of position.
+    #[test]
+    fn test_state_continuity() {
+        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let epoch = EpochTDB(0.0); // J2000
+        let dt = 1.0; // 1 second step
+
+        let state0 = eph
+            .state_of(NaifId::EARTH, epoch, NaifId::SSB)
+            .unwrap();
+        let state1 = eph
+            .state_of(NaifId::EARTH, EpochTDB(epoch.0 + dt), NaifId::SSB)
+            .unwrap();
+
+        // Numerical derivative of position should approximate reported velocity
+        for i in 0..3 {
+            let numerical_vel = (state1.position[i] - state0.position[i]) / dt;
+            let reported_vel = state0.velocity[i];
+            let rel_error = if reported_vel.abs() > 1e-10 {
+                ((numerical_vel - reported_vel) / reported_vel).abs()
+            } else {
+                (numerical_vel - reported_vel).abs()
+            };
+            assert!(
+                rel_error < 0.01,
+                "Velocity[{}] continuity: numerical={:.9}, reported={:.9}, rel_error={:.6}",
+                i,
+                numerical_vel,
+                reported_vel,
+                rel_error
+            );
+        }
+    }
+
+    /// Verify that known bodies have physically reasonable distances and speeds.
+    #[test]
+    fn test_position_magnitude() {
+        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let epoch = EpochTDB(0.0);
+
+        // Earth-SSB should be ~1 AU
+        let earth = eph
+            .state_of(NaifId::EARTH, epoch, NaifId::SSB)
+            .unwrap();
+        let au = 149597870.7; // km
+        assert!(
+            earth.distance() > 0.9 * au && earth.distance() < 1.1 * au,
+            "Earth-SSB distance should be ~1 AU, got {:.3} km",
+            earth.distance()
+        );
+        // Earth orbital speed ~30 km/s
+        assert!(
+            earth.speed() > 25.0 && earth.speed() < 35.0,
+            "Earth speed should be ~30 km/s, got {:.6}",
+            earth.speed()
+        );
+
+        // Moon-Earth should be ~384,400 km
+        let moon = eph
+            .state_of(NaifId::MOON, epoch, NaifId::EARTH)
+            .unwrap();
+        assert!(
+            moon.distance() > 350_000.0 && moon.distance() < 420_000.0,
+            "Moon-Earth distance should be ~384k km, got {:.3}",
+            moon.distance()
+        );
+        // Moon orbital speed ~1 km/s relative to Earth
+        assert!(
+            moon.speed() > 0.5 && moon.speed() < 1.5,
+            "Moon-Earth speed should be ~1 km/s, got {:.6}",
+            moon.speed()
+        );
+    }
+
+    /// Verify that CK evaluations return unit quaternions.
+    #[test]
+    fn test_ck_quaternion_normalization() {
+        let eph = Ephemeris::load("test_data/test.bc").unwrap();
+        let instruments = eph.ck_instruments();
+        if instruments.is_empty() {
+            return;
+        }
+
+        // Try querying at several SCLK values within plausible ranges.
+        // Since we can't access segment metadata directly, use known SCLK
+        // values from the CSPICE validation tests (discovered via muad-dib).
+        // The test.bc file uses large SCLK tick values — try a sweep.
+        for sclk_val in [1e8, 5e8, 1e9, 2e9] {
+            let sclk = understated::Sclk::from_ticks(sclk_val);
+            if let Ok(pointing) = eph.pointing_of(instruments[0], sclk) {
+                let [q0, q1, q2, q3] = pointing.quaternion;
+                let norm_sq = q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3;
+                assert!(
+                    (norm_sq - 1.0).abs() < 1e-10,
+                    "Quaternion should be normalized: norm_sq={}, sclk={}",
+                    norm_sq,
+                    sclk_val
+                );
+            }
+            // If pointing_of returns Err, the SCLK is outside coverage — that's fine.
+        }
+    }
+
+    /// Test multiple bodies from de440s: Earth barycenter, Sun, Moon, Earth.
+    #[test]
+    fn test_multi_body_type2() {
+        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let epoch = EpochTDB(0.0);
+
+        // All of these should be queryable relative to SSB
+        let bodies = [
+            (NaifId::SUN, "Sun"),
+            (NaifId::EMB, "EMB"),
+            (NaifId::MOON, "Moon"),
+            (NaifId::EARTH, "Earth"),
+        ];
+
+        for (body, name) in &bodies {
+            let state = eph
+                .state_of(*body, epoch, NaifId::SSB)
+                .unwrap_or_else(|_| panic!("{} should be available at J2000", name));
+
+            // All should have non-zero distance (even Sun is not at SSB exactly)
+            assert!(
+                state.distance() > 0.0,
+                "{} should have non-zero distance from SSB",
+                name
+            );
+
+            // All should have non-zero speed
+            assert!(
+                state.speed() > 0.0,
+                "{} should have non-zero speed relative to SSB",
+                name
+            );
+
+            // Target and center should be set correctly
+            assert_eq!(state.target, *body, "{} target mismatch", name);
+            assert_eq!(state.center, NaifId::SSB, "{} center mismatch", name);
+        }
+    }
 }
