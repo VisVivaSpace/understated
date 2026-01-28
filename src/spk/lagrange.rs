@@ -136,76 +136,9 @@ fn select_window_type8(data: &Spk8Data, epoch: f64) -> Result<(usize, usize)> {
 }
 
 /// Window selection for Type 9 (unequally spaced).
-#[allow(clippy::if_same_then_else)]
 fn select_window_type9(data: &Spk9Data, epoch: f64) -> Result<(usize, usize)> {
-    let n = data.states.len();
-    if n == 0 {
-        return Err(Error::EpochOutOfRange {
-            epoch,
-            start: 0.0,
-            end: 0.0,
-        });
-    }
-
-    let start_epoch = data.states.first().unwrap().epoch;
-    let end_epoch = data.states.last().unwrap().epoch;
-
-    if epoch < start_epoch || epoch > end_epoch {
-        return Err(Error::EpochOutOfRange {
-            epoch,
-            start: start_epoch,
-            end: end_epoch,
-        });
-    }
-
-    let mut lower = 0;
-    let mut upper = n - 1;
-    while upper - lower > 1 {
-        let mid = (lower + upper) / 2;
-        if data.states[mid].epoch <= epoch {
-            lower = mid;
-        } else {
-            upper = mid;
-        }
-    }
-    let high = lower + 1;
-
-    // CSPICE stores the polynomial degree, not the window size.
     let degree = data.window_size as usize;
-    let wndsiz = degree + 1;
-
-    let first = if wndsiz % 2 == 1 {
-        let near = if lower == 0 {
-            lower
-        } else if high >= n {
-            lower
-        } else if (epoch - data.states[lower].epoch).abs()
-            <= (data.states[high].epoch - epoch).abs()
-        {
-            lower
-        } else {
-            high
-        };
-        let half = degree / 2;
-        if near < half {
-            0
-        } else if near > n - 1 - (degree - half) {
-            n - wndsiz
-        } else {
-            near - half
-        }
-    } else {
-        let half = degree / 2;
-        if lower < half {
-            0
-        } else if lower > n - 1 - (degree - half) {
-            n - wndsiz
-        } else {
-            lower - half
-        }
-    };
-
-    Ok((first, first + degree + 1))
+    super::select_window_unequal(data.states.len(), degree, epoch, |i| data.states[i].epoch)
 }
 
 /// Evaluate SPK Type 8 (Lagrange, equally spaced).

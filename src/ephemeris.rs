@@ -21,7 +21,7 @@ use muad_dib::kernel::SpiceKernel;
 
 use crate::ck::evaluate_ck;
 use crate::error::{Error, Result};
-use crate::lsk::{extract_lsk, LeapSecondData};
+use crate::lsk::{try_extract_lsk, LeapSecondData};
 use crate::pointing::Pointing;
 use crate::spk::chain;
 use crate::state::State;
@@ -44,16 +44,23 @@ impl Ephemeris {
     /// Load a single SPICE kernel file.
     ///
     /// Supports SPK (.bsp), CK (.bc), text PCK (.tpc), and LSK (.tls) files.
+    /// If the kernel contains LSK data but it is malformed, this returns an error.
+    /// If the kernel simply has no LSK data, time conversion will be unavailable
+    /// but loading succeeds.
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let kernel = SpiceKernel::load(path)?;
-        let lsk = extract_lsk(&kernel).ok();
+        let lsk = try_extract_lsk(&kernel)?;
         Ok(Ephemeris { kernel, lsk })
     }
 
     /// Load multiple SPICE kernel files.
+    ///
+    /// If any kernel contains malformed LSK data, this returns an error.
+    /// If no kernels contain LSK data, time conversion will be unavailable
+    /// but loading succeeds.
     pub fn load_many<P: AsRef<Path>>(paths: &[P]) -> Result<Self> {
         let kernel = SpiceKernel::load_many(paths)?;
-        let lsk = extract_lsk(&kernel).ok();
+        let lsk = try_extract_lsk(&kernel)?;
         Ok(Ephemeris { kernel, lsk })
     }
 

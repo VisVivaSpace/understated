@@ -51,7 +51,7 @@ pub fn state_of(
 
     // Find common ancestor to minimize chaining depth and
     // accumulation of floating-point errors.
-    let ancestor = find_common_ancestor(kernel, target, center, epoch);
+    let ancestor = find_common_ancestor(kernel, target, center, epoch)?;
 
     let target_anc = chain_to(kernel, target, epoch, ancestor)?;
 
@@ -89,12 +89,16 @@ fn evaluate_body(kernel: &SpiceKernel, body: NaifId, epoch: EpochTDB) -> Result<
     Ok(state)
 }
 
+const MAX_CHAIN_DEPTH: usize = 20;
+
 /// Walk the center chain for a body, returning the list of center body IDs.
-fn center_chain(kernel: &SpiceKernel, body: NaifId, epoch: f64) -> Vec<NaifId> {
+///
+/// Returns an error if the chain depth exceeds [`MAX_CHAIN_DEPTH`], which
+/// would indicate a cycle or unexpectedly deep nesting in the SPK data.
+fn center_chain(kernel: &SpiceKernel, body: NaifId, epoch: f64) -> Result<Vec<NaifId>> {
     let mut chain = vec![body];
     let mut current = body;
-    for _ in 0..20 {
-        // Safety limit to prevent infinite loops
+    for _ in 0..MAX_CHAIN_DEPTH {
         let md_body = muad_dib::types::NaifId(current.0);
         let seg = kernel
             .spk_segments_for(md_body)
@@ -104,14 +108,17 @@ fn center_chain(kernel: &SpiceKernel, body: NaifId, epoch: f64) -> Vec<NaifId> {
                 let center = NaifId::from(s.center_code);
                 chain.push(center);
                 if center.0 == SSB {
-                    break;
+                    return Ok(chain);
                 }
                 current = center;
             }
-            None => break,
+            None => return Ok(chain),
         }
     }
-    chain
+    Err(Error::ChainDepthExceeded {
+        body,
+        limit: MAX_CHAIN_DEPTH,
+    })
 }
 
 /// Find the nearest common ancestor of two bodies in the SPK segment tree.
@@ -121,18 +128,18 @@ fn find_common_ancestor(
     target: NaifId,
     center: NaifId,
     epoch: EpochTDB,
-) -> NaifId {
-    let target_chain = center_chain(kernel, target, epoch.0);
-    let center_set: HashSet<NaifId> = center_chain(kernel, center, epoch.0).into_iter().collect();
+) -> Result<NaifId> {
+    let target_chain = center_chain(kernel, target, epoch.0)?;
+    let center_set: HashSet<NaifId> = center_chain(kernel, center, epoch.0)?.into_iter().collect();
 
     // Find the first body in target's chain that also appears in center's chain.
     for &body in &target_chain {
         if center_set.contains(&body) {
-            return body;
+            return Ok(body);
         }
     }
 
-    NaifId(SSB)
+    Ok(NaifId(SSB))
 }
 
 /// Compute the state of a body relative to `ancestor` by following the segment chain.

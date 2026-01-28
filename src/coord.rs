@@ -55,7 +55,7 @@ impl Rectangular {
         Latitudinal {
             radius,
             longitude: y.atan2(x),
-            latitude: (z / radius).asin(),
+            latitude: (z / radius).clamp(-1.0, 1.0).asin(),
         }
     }
 
@@ -74,7 +74,7 @@ impl Rectangular {
 
         Spherical {
             radius,
-            colatitude: (z / radius).acos(),
+            colatitude: (z / radius).clamp(-1.0, 1.0).acos(),
             longitude: y.atan2(x),
         }
     }
@@ -283,6 +283,22 @@ mod tests {
         assert_eq!(origin.to_latitudinal().radius, 0.0);
         assert_eq!(origin.to_spherical().radius, 0.0);
         assert_eq!(origin.to_cylindrical().r, 0.0);
+    }
+
+    #[test]
+    fn test_near_pole_no_nan() {
+        // When z ≈ radius, floating-point rounding could make z/radius slightly > 1.0
+        // which would cause asin/acos to return NaN without clamping.
+        let r = 6378.0_f64;
+        // Construct a point where z/radius could exceed 1.0 due to rounding
+        let rect = Rectangular([1e-15, 1e-15, r]);
+        let lat = rect.to_latitudinal();
+        assert!(!lat.latitude.is_nan(), "latitude should not be NaN near pole");
+        assert!((lat.latitude - FRAC_PI_2).abs() < 1e-10, "should be near +90°");
+
+        let sph = rect.to_spherical();
+        assert!(!sph.colatitude.is_nan(), "colatitude should not be NaN near pole");
+        assert!(sph.colatitude.abs() < 1e-10, "should be near 0° colatitude");
     }
 
     #[test]

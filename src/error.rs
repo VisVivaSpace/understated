@@ -1,6 +1,6 @@
 //! Error types for interpolation and time operations.
 
-use crate::types::NaifId;
+use crate::types::{FrameId, NaifId};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -31,6 +31,22 @@ pub enum Error {
     /// Epoch is outside the valid range for interpolation.
     #[error("Epoch {epoch} is outside segment coverage [{start}, {end}]")]
     EpochOutOfRange { epoch: f64, start: f64, end: f64 },
+
+    /// States are in different reference frames.
+    #[error("Cannot combine states in different frames: {frame_a} vs {frame_b}")]
+    FrameMismatch { frame_a: FrameId, frame_b: FrameId },
+
+    /// Invalid chain: self.target does not match other.center.
+    #[error("Invalid chain: self.target ({self_target}) != other.center ({other_center})")]
+    InvalidChain { self_target: NaifId, other_center: NaifId },
+
+    /// States have different center bodies.
+    #[error("Cannot subtract states with different centers: {center_a} vs {center_b}")]
+    CenterMismatch { center_a: NaifId, center_b: NaifId },
+
+    /// Center chain depth limit exceeded.
+    #[error("Center chain depth limit ({limit}) exceeded for body {body}")]
+    ChainDepthExceeded { body: NaifId, limit: usize },
 
     /// I/O error from file operations.
     #[error(transparent)]

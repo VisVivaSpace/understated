@@ -108,3 +108,21 @@ pub fn extract_lsk(kernel: &muad_dib::kernel::SpiceKernel) -> Result<LeapSecondD
         .map(LeapSecondData::from)
         .map_err(Into::into)
 }
+
+/// Try to extract LSK data, distinguishing "absent" from "malformed".
+///
+/// Returns `Ok(None)` if no LSK data is present in the kernel.
+/// Returns `Err` if LSK data is present but malformed.
+/// Returns `Ok(Some(...))` on success.
+pub fn try_extract_lsk(kernel: &muad_dib::kernel::SpiceKernel) -> Result<Option<LeapSecondData>> {
+    use muad_dib::spice::lsk::LeapSecondExt;
+
+    if !kernel.has_lsk() {
+        return Ok(None);
+    }
+
+    kernel
+        .lsk_data()
+        .map(|d| Some(LeapSecondData::from(d)))
+        .map_err(Into::into)
+}
