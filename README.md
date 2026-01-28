@@ -95,8 +95,16 @@ Where CSPICE validation is available, accuracy targets are:
 | Velocity | 1 nm/s (1e-12 km/s) |
 | Quaternion | ~1e-8 (~0.00001 degrees) |
 
-Run CSPICE validation tests (requires CSPICE at `/Users/nstrange/cspice`):
+Run CSPICE validation tests (requires the [CSPICE toolkit](https://naif.jpl.nasa.gov/naif/toolkit_C.html)):
 
 ```bash
+CSPICE_DIR=/path/to/cspice cargo test --features cspice,test-data
+```
+
+Set `CSPICE_DIR` to your CSPICE installation directory (the one containing `lib/`).
+You can also export it in your shell profile to avoid repeating it:
+
+```bash
+export CSPICE_DIR=/path/to/cspice
 cargo test --features cspice,test-data
 ```

@@ -2,9 +2,10 @@
 //!
 //! Validates understated's interpolation against CSPICE (the reference
 //! implementation) using FFI bindings. These tests require the `cspice`
-//! feature and the CSPICE toolkit installed at `/Users/nstrange/cspice`.
+//! feature and the CSPICE toolkit. Set the `CSPICE_DIR` environment
+//! variable to the CSPICE installation directory (containing `lib/`).
 //!
-//! Run with: `cargo test --features cspice,test-data`
+//! Run with: `CSPICE_DIR=/path/to/cspice cargo test --features cspice,test-data`
 
 #![cfg(all(feature = "cspice", feature = "test-data"))]
 
