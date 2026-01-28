@@ -2,18 +2,31 @@
 
 #[cfg(feature = "test-data")]
 mod tests {
+    use std::sync::OnceLock;
     use understated::{Ephemeris, EpochTDB, NaifId, TimeFormat};
+
+    fn de440s() -> &'static Ephemeris {
+        static EPH: OnceLock<Ephemeris> = OnceLock::new();
+        EPH.get_or_init(|| Ephemeris::load("test_data/de440s.bsp").unwrap())
+    }
+
+    fn de440s_with_lsk() -> &'static Ephemeris {
+        static EPH: OnceLock<Ephemeris> = OnceLock::new();
+        EPH.get_or_init(|| {
+            Ephemeris::load_many(&["test_data/de440s.bsp", "test_data/naif0012.tls"]).unwrap()
+        })
+    }
 
     #[test]
     fn test_load_spk() {
-        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let eph = de440s();
         let bodies = eph.spk_bodies();
         assert!(!bodies.is_empty(), "de440s should contain bodies");
     }
 
     #[test]
     fn test_earth_state_from_de440s() {
-        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let eph = de440s();
         let epoch = EpochTDB(0.0); // J2000
 
         // Earth relative to Earth-Moon Barycenter
@@ -33,7 +46,7 @@ mod tests {
 
     #[test]
     fn test_moon_state_from_de440s() {
-        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let eph = de440s();
         let epoch = EpochTDB(0.0); // J2000
 
         // Moon relative to Earth-Moon Barycenter
@@ -52,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_body_chaining() {
-        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let eph = de440s();
         let epoch = EpochTDB(0.0);
 
         // Earth relative to SSB requires chaining through EMB
@@ -74,7 +87,7 @@ mod tests {
 
     #[test]
     fn test_no_coverage_error() {
-        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let eph = de440s();
 
         // Epoch far outside de440s coverage
         let result = eph.state_of(NaifId::EARTH, EpochTDB(1e12), NaifId::SSB);
@@ -83,7 +96,7 @@ mod tests {
 
     #[test]
     fn test_negation_via_center_swap() {
-        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let eph = de440s();
         let epoch = EpochTDB(0.0);
 
         // Moon relative to Earth: chaining Moon→EMB→Earth works because
@@ -122,7 +135,7 @@ mod tests {
 
     #[test]
     fn test_spk_bodies_discovery() {
-        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let eph = de440s();
         let bodies = eph.spk_bodies();
 
         // de440s should contain major planets + Moon + Sun
@@ -134,11 +147,7 @@ mod tests {
 
     #[test]
     fn test_load_multiple_files() {
-        let eph = Ephemeris::load_many(&[
-            "test_data/de440s.bsp",
-            "test_data/naif0012.tls",
-        ])
-        .unwrap();
+        let eph = de440s_with_lsk();
 
         // Should have LSK data from the .tls file
         assert!(eph.lsk_data().is_some(), "Should have LSK data");
@@ -149,11 +158,7 @@ mod tests {
 
     #[test]
     fn test_utc_tdb_conversion() {
-        let eph = Ephemeris::load_many(&[
-            "test_data/de440s.bsp",
-            "test_data/naif0012.tls",
-        ])
-        .unwrap();
+        let eph = de440s_with_lsk();
 
         let tdb = eph.utc_to_tdb("2020-01-01T12:00:00").unwrap();
         assert!(tdb.0 > 0.0, "2020 should be after J2000");
@@ -164,7 +169,7 @@ mod tests {
 
     #[test]
     fn test_utc_conversion_requires_lsk() {
-        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let eph = de440s();
 
         // Without LSK data, conversion should fail
         let result = eph.utc_to_tdb("2020-01-01T12:00:00");
@@ -208,7 +213,7 @@ mod tests {
     /// consistent with the numerical derivative of position.
     #[test]
     fn test_state_continuity() {
-        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let eph = de440s();
         let epoch = EpochTDB(0.0); // J2000
         let dt = 1.0; // 1 second step
 
@@ -242,7 +247,7 @@ mod tests {
     /// Verify that known bodies have physically reasonable distances and speeds.
     #[test]
     fn test_position_magnitude() {
-        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let eph = de440s();
         let epoch = EpochTDB(0.0);
 
         // Earth-SSB should be ~1 AU
@@ -311,7 +316,7 @@ mod tests {
     /// Test multiple bodies from de440s: Earth barycenter, Sun, Moon, Earth.
     #[test]
     fn test_multi_body_type2() {
-        let eph = Ephemeris::load("test_data/de440s.bsp").unwrap();
+        let eph = de440s();
         let epoch = EpochTDB(0.0);
 
         // All of these should be queryable relative to SSB

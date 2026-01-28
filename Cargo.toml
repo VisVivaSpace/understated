@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-muad-dib = { path = "/Users/nstrange/git/open_source/muad-dib" }
+muad-dib = "0.3.0"
 thiserror = "1.0"
 
 [features]
