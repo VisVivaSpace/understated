@@ -7,6 +7,58 @@ use crate::error::{Error, Result};
 use crate::state::State;
 use muad_dib::kernel::spk_types::Spk13Data;
 
+/// Hermite divided-difference table stored as a flat array.
+///
+/// `z[i]` holds augmented epochs, `q[i * m + j]` holds divided differences.
+/// The diagonal `q[i * m + i]` gives Newton-form coefficients.
+struct HermiteTable {
+    z: Vec<f64>,
+    q: Vec<f64>,
+    m: usize,
+}
+
+impl HermiteTable {
+    /// Build the Hermite divided-difference table for `n` data points.
+    fn build(epochs: &[f64], values: &[f64], derivatives: &[f64]) -> Self {
+        let n = epochs.len();
+        let m = 2 * n;
+        let mut z = vec![0.0; m];
+        let mut q = vec![0.0; m * m];
+
+        for i in 0..n {
+            z[2 * i] = epochs[i];
+            z[2 * i + 1] = epochs[i];
+            q[(2 * i) * m] = values[i];
+            q[(2 * i + 1) * m] = values[i];
+            q[(2 * i + 1) * m + 1] = derivatives[i];
+            if i > 0 {
+                let denom = z[2 * i] - z[2 * i - 1];
+                if denom.abs() > 1e-15 {
+                    q[(2 * i) * m + 1] =
+                        (q[(2 * i) * m] - q[(2 * i - 1) * m]) / denom;
+                }
+            }
+        }
+
+        for j in 2..m {
+            for i in j..m {
+                let denom = z[i] - z[i - j];
+                if denom.abs() > 1e-15 {
+                    q[i * m + j] = (q[i * m + (j - 1)] - q[(i - 1) * m + (j - 1)]) / denom;
+                }
+            }
+        }
+
+        HermiteTable { z, q, m }
+    }
+
+    /// Diagonal coefficient q[i][i].
+    #[inline]
+    fn diag(&self, i: usize) -> f64 {
+        self.q[i * self.m + i]
+    }
+}
+
 /// Hermite interpolation for a single component.
 fn hermite_interpolate(epochs: &[f64], values: &[f64], derivatives: &[f64], epoch: f64) -> f64 {
     let n = epochs.len();
@@ -20,33 +72,12 @@ fn hermite_interpolate(epochs: &[f64], values: &[f64], derivatives: &[f64], epoc
         return values[0] + derivatives[0] * (epoch - epochs[0]);
     }
 
-    let m = 2 * n;
-    let mut z = vec![0.0; m];
-    let mut q = vec![vec![0.0; m]; m];
+    let table = HermiteTable::build(epochs, values, derivatives);
+    let m = table.m;
 
-    for i in 0..n {
-        z[2 * i] = epochs[i];
-        z[2 * i + 1] = epochs[i];
-        q[2 * i][0] = values[i];
-        q[2 * i + 1][0] = values[i];
-        q[2 * i + 1][1] = derivatives[i];
-        if i > 0 {
-            q[2 * i][1] = (q[2 * i][0] - q[2 * i - 1][0]) / (z[2 * i] - z[2 * i - 1]);
-        }
-    }
-
-    for j in 2..m {
-        for i in j..m {
-            let denom = z[i] - z[i - j];
-            if denom.abs() > 1e-15 {
-                q[i][j] = (q[i][j - 1] - q[i - 1][j - 1]) / denom;
-            }
-        }
-    }
-
-    let mut result = q[m - 1][m - 1];
+    let mut result = table.diag(m - 1);
     for i in (0..m - 1).rev() {
-        result = result * (epoch - z[i]) + q[i][i];
+        result = result * (epoch - table.z[i]) + table.diag(i);
     }
     result
 }
@@ -66,29 +97,8 @@ fn hermite_interpolate_derivative(
         return derivatives[0];
     }
 
-    let m = 2 * n;
-    let mut z = vec![0.0; m];
-    let mut q = vec![vec![0.0; m]; m];
-
-    for i in 0..n {
-        z[2 * i] = epochs[i];
-        z[2 * i + 1] = epochs[i];
-        q[2 * i][0] = values[i];
-        q[2 * i + 1][0] = values[i];
-        q[2 * i + 1][1] = derivatives[i];
-        if i > 0 {
-            q[2 * i][1] = (q[2 * i][0] - q[2 * i - 1][0]) / (z[2 * i] - z[2 * i - 1]);
-        }
-    }
-
-    for j in 2..m {
-        for i in j..m {
-            let denom = z[i] - z[i - j];
-            if denom.abs() > 1e-15 {
-                q[i][j] = (q[i][j - 1] - q[i - 1][j - 1]) / denom;
-            }
-        }
-    }
+    let table = HermiteTable::build(epochs, values, derivatives);
+    let m = table.m;
 
     // Derivative using product rule on Newton's form
     let mut result = 0.0;
@@ -96,14 +106,14 @@ fn hermite_interpolate_derivative(
         let mut d_prod = 0.0;
         for k in 0..i {
             let mut term = 1.0;
-            for (j, &zj) in z[..i].iter().enumerate() {
+            for j in 0..i {
                 if j != k {
-                    term *= epoch - zj;
+                    term *= epoch - table.z[j];
                 }
             }
             d_prod += term;
         }
-        result += q[i][i] * d_prod;
+        result += table.diag(i) * d_prod;
     }
     result
 }

@@ -31,7 +31,7 @@ pub mod ck;
 pub mod ephemeris;
 
 pub use error::{Error, Result};
-pub use types::{EpochTDB, NaifId, Sclk};
+pub use types::{EpochTDB, FrameId, NaifId, Sclk};
 pub use state::State;
 pub use pointing::Pointing;
 pub use coord::{Rectangular, Latitudinal, Spherical, Cylindrical};

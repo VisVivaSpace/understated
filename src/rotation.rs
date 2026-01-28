@@ -35,6 +35,7 @@ pub fn q2m(q: &[f64; 4]) -> Mat3 {
 
     // Sharpen: normalize if not already unit length
     let l2 = q[0] * q[0] + q1s + q2s + q3s;
+    // Intentional exact float comparison: matches CSPICE q2m_c sharpening logic.
     let (q01, q02, q03, q12, q13, q23) = if l2 != 1.0 && l2 != 0.0 {
         let s = 1.0 / l2;
         q1s *= s;
@@ -110,6 +111,7 @@ pub fn m2q(m: &Mat3) -> [f64; 4] {
 
     // Polish: normalize if not already unit length
     let l2 = c * c + s1 * s1 + s2 * s2 + s3 * s3;
+    // Intentional exact float comparison: matches CSPICE m2q_c polish step.
     if l2 != 1.0 {
         let polish = 1.0 / l2.sqrt();
         c *= polish;
@@ -138,6 +140,7 @@ pub fn raxisa(m: &Mat3) -> ([f64; 3], f64) {
 
     let vnorm = (q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
 
+    // Intentional exact float comparison: matches CSPICE raxisa_c zero-check.
     if vnorm == 0.0 {
         // Identity rotation
         ([0.0, 0.0, 1.0], 0.0)

@@ -26,7 +26,7 @@ use crate::pointing::Pointing;
 use crate::spk::chain;
 use crate::state::State;
 use crate::time::TimeFormat;
-use crate::types::{EpochTDB, NaifId, Sclk};
+use crate::types::{EpochTDB, FrameId, NaifId, Sclk};
 
 /// High-level entry point for querying SPICE ephemeris and pointing data.
 ///
@@ -91,7 +91,7 @@ impl Ephemeris {
         let view = self.kernel.ck_view(segment);
         let data = view.data();
         let mut pointing = evaluate_ck(data, sclk_ticks)?;
-        pointing.frame = segment.frame_code.0;
+        pointing.frame = FrameId(segment.frame_code.0);
 
         Ok(pointing)
     }

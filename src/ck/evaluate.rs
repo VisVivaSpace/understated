@@ -37,20 +37,18 @@ pub fn evaluate_type1(data: &Ck1Data, sclk: f64) -> Result<Pointing> {
         });
     }
 
-    let mut best_idx = None;
-    for (i, record) in data.records.iter().enumerate() {
-        if record.sclk <= sclk {
-            best_idx = Some(i);
-        } else {
-            break;
+    // Binary search for the last record with sclk <= query.
+    let idx = match data.records.binary_search_by(|r| r.sclk.partial_cmp(&sclk).unwrap()) {
+        Ok(i) => i,
+        Err(0) => {
+            return Err(Error::EpochOutOfRange {
+                epoch: sclk,
+                start: data.records.first().unwrap().sclk,
+                end: data.records.last().unwrap().sclk,
+            });
         }
-    }
-
-    let idx = best_idx.ok_or(Error::EpochOutOfRange {
-        epoch: sclk,
-        start: data.records.first().unwrap().sclk,
-        end: data.records.last().unwrap().sclk,
-    })?;
+        Err(i) => i - 1,
+    };
 
     let record = &data.records[idx];
     Ok(Pointing::new_raw(
@@ -88,15 +86,12 @@ pub fn evaluate_type3(data: &Ck3Data, sclk: f64) -> Result<Pointing> {
         });
     }
 
-    // Find lower bracketing record
-    let mut lower_idx = 0;
-    for (i, record) in data.records.iter().enumerate() {
-        if record.sclk <= sclk {
-            lower_idx = i;
-        } else {
-            break;
-        }
-    }
+    // Binary search for lower bracketing record.
+    let lower_idx = match data.records.binary_search_by(|r| r.sclk.partial_cmp(&sclk).unwrap()) {
+        Ok(i) => i,
+        Err(0) => 0, // Covered by bounds check above
+        Err(i) => i - 1,
+    };
 
     let rec0 = &data.records[lower_idx];
 

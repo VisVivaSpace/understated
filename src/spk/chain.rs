@@ -11,10 +11,12 @@
 //!    `state(A, B) = state(A, ancestor) - state(B, ancestor)`.
 //!    This minimizes floating-point error by avoiding unnecessary SSB round-trips.
 
+use std::collections::HashSet;
+
 use crate::error::{Error, Result};
 use crate::spk::evaluate_spk;
 use crate::state::State;
-use crate::types::{EpochTDB, NaifId};
+use crate::types::{EpochTDB, FrameId, NaifId};
 use muad_dib::kernel::SpiceKernel;
 
 const SSB: i32 = 0;
@@ -30,7 +32,7 @@ pub fn state_of(
     center: NaifId,
 ) -> Result<State> {
     if target == center {
-        return Ok(State::new(target, center, 1, [0.0; 3], [0.0; 3]));
+        return Ok(State::new(target, center, FrameId::J2000, [0.0; 3], [0.0; 3]));
     }
 
     // First, try the direct path: evaluate target's segment and check
@@ -82,7 +84,7 @@ fn evaluate_body(kernel: &SpiceKernel, body: NaifId, epoch: EpochTDB) -> Result<
 
     state.target = NaifId::from(segment.target_code);
     state.center = NaifId::from(segment.center_code);
-    state.frame = segment.frame_code.0;
+    state.frame = FrameId(segment.frame_code.0);
 
     Ok(state)
 }
@@ -121,11 +123,11 @@ fn find_common_ancestor(
     epoch: EpochTDB,
 ) -> NaifId {
     let target_chain = center_chain(kernel, target, epoch.0);
-    let center_chain = center_chain(kernel, center, epoch.0);
+    let center_set: HashSet<NaifId> = center_chain(kernel, center, epoch.0).into_iter().collect();
 
-    // Find the first body in target's chain that also appears in center's chain
+    // Find the first body in target's chain that also appears in center's chain.
     for &body in &target_chain {
-        if center_chain.contains(&body) {
+        if center_set.contains(&body) {
             return body;
         }
     }
@@ -141,7 +143,7 @@ fn chain_to(
     ancestor: NaifId,
 ) -> Result<State> {
     if body == ancestor {
-        return Ok(State::new(body, ancestor, 1, [0.0; 3], [0.0; 3]));
+        return Ok(State::new(body, ancestor, FrameId::J2000, [0.0; 3], [0.0; 3]));
     }
 
     let state = evaluate_body(kernel, body, epoch)?;

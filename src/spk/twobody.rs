@@ -151,16 +151,21 @@ fn find_nearest_state(data: &Spk5Data, epoch: f64) -> Result<(usize, f64)> {
         });
     }
 
-    let mut best_idx = 0;
-    let mut best_diff = (data.states[0].epoch - epoch).abs();
-
-    for (i, state) in data.states.iter().enumerate() {
-        let diff = (state.epoch - epoch).abs();
-        if diff < best_diff {
-            best_diff = diff;
-            best_idx = i;
+    // Binary search for the nearest state by epoch.
+    let best_idx = match data
+        .states
+        .binary_search_by(|s| s.epoch.partial_cmp(&epoch).unwrap())
+    {
+        Ok(i) => i,
+        Err(0) => 0,
+        Err(i) if i >= n => n - 1,
+        Err(i) => {
+            // Between states[i-1] and states[i]; pick the closer one.
+            let d_lo = (epoch - data.states[i - 1].epoch).abs();
+            let d_hi = (data.states[i].epoch - epoch).abs();
+            if d_lo <= d_hi { i - 1 } else { i }
         }
-    }
+    };
 
     let dt = epoch - data.states[best_idx].epoch;
     Ok((best_idx, dt))

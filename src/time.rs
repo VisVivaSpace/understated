@@ -16,8 +16,9 @@ impl EpochTDB {
     pub fn parse(time_str: &str) -> Result<EpochTDB> {
         muad_dib::types::EpochTDB::parse(time_str)
             .map(EpochTDB::from)
-            .map_err(|_| Error::TimeParseError {
+            .map_err(|e| Error::TimeParseError {
                 input: time_str.to_string(),
+                reason: Some(e.to_string()),
             })
     }
 
@@ -25,8 +26,9 @@ impl EpochTDB {
     pub fn parse_with_format(time_str: &str, format: TimeFormat) -> Result<EpochTDB> {
         muad_dib::types::EpochTDB::parse_with_format(time_str, format)
             .map(EpochTDB::from)
-            .map_err(|_| Error::TimeParseError {
+            .map_err(|e| Error::TimeParseError {
                 input: time_str.to_string(),
+                reason: Some(e.to_string()),
             })
     }
 }

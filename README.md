@@ -36,7 +36,7 @@ understated (evaluation)  <--depends-->  muad-dib (file I/O)
 | CK Type | Method | CSPICE-Validated |
 |---------|--------|:----------------:|
 | 1 | Discrete pointing | No |
-| 3 | SLERP quaternion interpolation | Yes |
+| 3 | Linear interpolation (axis-angle, rotation matrix; matches CSPICE CKE03) | Yes |
 
 ## Usage
 

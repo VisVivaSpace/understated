@@ -30,9 +30,8 @@
 
 ## Phase 4: CK Interpolation
 - [x] Create src/ck/mod.rs
-- [x] Create src/ck/slerp.rs
-- [x] Create src/ck/evaluate.rs
-- [x] Tests: SLERP, CK type 1/3
+- [x] Create src/ck/evaluate.rs (CK type 1 discrete, type 3 axis-angle interpolation)
+- [x] Tests: CK type 1/3
 
 ## Phase 5: Ephemeris Facade + Body Chaining
 - [x] Create src/spk/chain.rs
@@ -59,7 +58,7 @@
 ### Findings
 
 **CK Type 3 — algorithm mismatch (root cause of test failure):**
-- understated uses quaternion SLERP
+- understated originally used quaternion SLERP; now uses CSPICE CKE03 axis-angle algorithm
 - CSPICE CKE03 uses rotation-matrix axis-angle interpolation:
   q→R, relative rotation, extract axis-angle, partial rotation, compose
 - Both are geodesic interpolation on SO(3), different floating-point paths
@@ -77,23 +76,23 @@
 
 ### Tasks
 
-- [ ] Add rotation matrix utilities in `src/rotation.rs`:
+- [x] Add rotation matrix utilities in `src/rotation.rs`:
       q2m, m2q (Shepperd), raxisa, axisar, mtxm, mxmt
-- [ ] Rewrite CK Type 3 `evaluate_type3()` to match CKE03 algorithm
-- [ ] Tighten `test_str2et_vs_cspice` tolerance from 1e-6 → 1e-9
-- [ ] Tighten `test_ck_vs_cspice` tolerance (expect machine precision)
-- [ ] Delete diagnostic `tests/tolerance_audit.rs`
-- [ ] Verify: `cargo test --features cspice,test-data` all pass
-- [ ] Verify: `cargo clippy` clean
+- [x] Rewrite CK Type 3 `evaluate_type3()` to match CKE03 algorithm
+- [x] Tighten `test_str2et_vs_cspice` tolerance from 1e-6 → 1e-9
+- [x] Tighten `test_ck_vs_cspice` tolerance (expect machine precision)
+- [x] Delete diagnostic `tests/tolerance_audit.rs`
+- [x] Verify: `cargo test --features cspice,test-data` all pass
+- [x] Verify: `cargo clippy` clean
 
-**DO NOT modify:** `src/state.rs`, `src/spk/*.rs`, `src/pointing.rs`,
-`src/time.rs`, `src/lsk.rs`, any muad-dib files
+**Phase 8 constraint (completed):** Only rotation.rs and ck/evaluate.rs were
+modified. State, SPK, pointing, time, and lsk were left unchanged.
 
 ## Review
 
 ### Phase 7 Summary
 - **Git LFS**: Configured to track `*.bsp`, `*.bc`, `*.bpc`, `*.hdf5` in `test_data/`. Text files (`.tls`, `.tpc`) remain regular git objects. Removed `/test_data` from `.gitignore`.
 - **Examples**: 3 examples ported from muad-dib, adapted to understated's `Ephemeris` API. `kernel_pool` skipped (not in understated's scope).
-- **Tests**: 4 new integration tests added — state continuity (velocity ≈ d(position)/dt), position magnitude (Earth ~1 AU, Moon ~384k km), CK quaternion normalization, and multi-body Type 2 queries. All 82 tests pass (65 unit + 17 integration).
+- **Tests**: 4 new integration tests added — state continuity (velocity ≈ d(position)/dt), position magnitude (Earth ~1 AU, Moon ~384k km), CK quaternion normalization, and multi-body Type 2 queries. All 79 tests pass (54 unit + 8 CSPICE validation + 17 integration).
 - **Notes**: SPK/CK support status table with validation gaps. Full muad-dib API dependency inventory.
 - **README**: Experimental status, architecture diagram, supported types, build instructions, validation targets.

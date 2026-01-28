@@ -17,8 +17,12 @@ pub enum Error {
     UnsupportedCkType { ck_type: i32 },
 
     /// Cannot parse time string.
-    #[error("Cannot parse time string: '{input}'")]
-    TimeParseError { input: String },
+    #[error("Cannot parse time string: '{input}'{}", reason.as_ref().map(|r| format!(": {r}")).unwrap_or_default())]
+    TimeParseError {
+        input: String,
+        /// Upstream parse failure reason, if available.
+        reason: Option<String>,
+    },
 
     /// Leap second kernel (LSK) data required for TDB/UTC conversion.
     #[error("Leap second kernel (LSK) data required for TDB/UTC conversion")]

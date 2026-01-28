@@ -4,7 +4,7 @@
 
 use crate::error::{Error, Result};
 use crate::state::State;
-use muad_dib::kernel::spk_types::{Spk2Data, Spk3Data};
+use muad_dib::kernel::spk_types::{ChebyshevRecord, ChebyshevRecordWithVelocity, Spk2Data, Spk3Data};
 
 /// Clenshaw recurrence for Chebyshev polynomial evaluation.
 ///
@@ -57,67 +57,77 @@ fn clenshaw_derivative(coeffs: &[f64], s: f64, scale: f64) -> f64 {
     scale * clenshaw(&g, s)
 }
 
-fn find_record(data: &Spk2Data, epoch: f64) -> Result<(usize, f64)> {
-    if data.records.is_empty() {
-        return Err(Error::EpochOutOfRange {
-            epoch,
-            start: data.init_epoch,
-            end: data.init_epoch,
-        });
-    }
-
-    for (i, record) in data.records.iter().enumerate() {
-        let start = record.midpoint - record.radius;
-        let end = record.midpoint + record.radius;
-
-        if epoch >= start && epoch <= end {
-            let s = (epoch - record.midpoint) / record.radius;
-            return Ok((i, s));
-        }
-    }
-
-    let first = &data.records[0];
-    let last = &data.records[data.records.len() - 1];
-
-    Err(Error::EpochOutOfRange {
-        epoch,
-        start: first.midpoint - first.radius,
-        end: last.midpoint + last.radius,
-    })
+/// Trait abstracting Chebyshev record access for Types 2 and 3.
+trait ChebyshevRecordAccess {
+    fn midpoint(&self) -> f64;
+    fn radius(&self) -> f64;
 }
 
-fn find_record_type3(data: &Spk3Data, epoch: f64) -> Result<(usize, f64)> {
-    if data.records.is_empty() {
+impl ChebyshevRecordAccess for ChebyshevRecord {
+    fn midpoint(&self) -> f64 { self.midpoint }
+    fn radius(&self) -> f64 { self.radius }
+}
+
+impl ChebyshevRecordAccess for ChebyshevRecordWithVelocity {
+    fn midpoint(&self) -> f64 { self.midpoint }
+    fn radius(&self) -> f64 { self.radius }
+}
+
+/// Find the Chebyshev record containing `epoch` using binary search.
+///
+/// Records are sorted by midpoint. Returns the record index and
+/// the normalized argument `s` in [-1, 1].
+fn find_record_generic<R: ChebyshevRecordAccess>(
+    records: &[R],
+    init_epoch: f64,
+    epoch: f64,
+) -> Result<(usize, f64)> {
+    if records.is_empty() {
         return Err(Error::EpochOutOfRange {
             epoch,
-            start: data.init_epoch,
-            end: data.init_epoch,
+            start: init_epoch,
+            end: init_epoch,
         });
     }
 
-    for (i, record) in data.records.iter().enumerate() {
-        let start = record.midpoint - record.radius;
-        let end = record.midpoint + record.radius;
-
-        if epoch >= start && epoch <= end {
-            let s = (epoch - record.midpoint) / record.radius;
-            return Ok((i, s));
+    // Binary search: find the record whose interval contains the epoch.
+    // Records are sorted by midpoint and contiguous, so we search by midpoint.
+    let n = records.len();
+    let mut lo = 0usize;
+    let mut hi = n;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if records[mid].midpoint() + records[mid].radius() < epoch {
+            lo = mid + 1;
+        } else {
+            hi = mid;
         }
     }
 
-    let first = &data.records[0];
-    let last = &data.records[data.records.len() - 1];
+    // Check the candidate record (and its neighbor) for containment.
+    let check_start = lo.saturating_sub(1);
+    let check_end = n.min(lo + 2);
+    for (idx, r) in records.iter().enumerate().take(check_end).skip(check_start) {
+        let start = r.midpoint() - r.radius();
+        let end = r.midpoint() + r.radius();
+        if epoch >= start && epoch <= end {
+            let s = (epoch - r.midpoint()) / r.radius();
+            return Ok((idx, s));
+        }
+    }
 
+    let first = &records[0];
+    let last = &records[n - 1];
     Err(Error::EpochOutOfRange {
         epoch,
-        start: first.midpoint - first.radius,
-        end: last.midpoint + last.radius,
+        start: first.midpoint() - first.radius(),
+        end: last.midpoint() + last.radius(),
     })
 }
 
 /// Evaluate SPK Type 2 (Chebyshev position only, velocity via differentiation).
 pub fn evaluate_type2(data: &Spk2Data, epoch: f64) -> Result<State> {
-    let (idx, s) = find_record(data, epoch)?;
+    let (idx, s) = find_record_generic(&data.records, data.init_epoch, epoch)?;
     let record = &data.records[idx];
 
     let x = clenshaw(&record.x_coeffs, s);
@@ -134,7 +144,7 @@ pub fn evaluate_type2(data: &Spk2Data, epoch: f64) -> Result<State> {
 
 /// Evaluate SPK Type 3 (Chebyshev position + velocity coefficients).
 pub fn evaluate_type3(data: &Spk3Data, epoch: f64) -> Result<State> {
-    let (idx, s) = find_record_type3(data, epoch)?;
+    let (idx, s) = find_record_generic(&data.records, data.init_epoch, epoch)?;
     let record = &data.records[idx];
 
     let x = clenshaw(&record.x_coeffs, s);

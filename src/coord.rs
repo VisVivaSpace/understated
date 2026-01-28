@@ -8,8 +8,6 @@
 //!
 //! All angles are in radians. Conversions follow NAIF CSPICE conventions.
 
-use std::f64::consts::PI;
-
 /// Rectangular (Cartesian) coordinates.
 ///
 /// Components are [x, y, z] in the same units as the source data (typically km).
@@ -116,12 +114,12 @@ impl Latitudinal {
 
     #[inline]
     pub fn longitude_deg(&self) -> f64 {
-        self.longitude * 180.0 / PI
+        self.longitude.to_degrees()
     }
 
     #[inline]
     pub fn latitude_deg(&self) -> f64 {
-        self.latitude * 180.0 / PI
+        self.latitude.to_degrees()
     }
 }
 
@@ -160,12 +158,12 @@ impl Spherical {
 
     #[inline]
     pub fn colatitude_deg(&self) -> f64 {
-        self.colatitude * 180.0 / PI
+        self.colatitude.to_degrees()
     }
 
     #[inline]
     pub fn longitude_deg(&self) -> f64 {
-        self.longitude * 180.0 / PI
+        self.longitude.to_degrees()
     }
 }
 
@@ -200,7 +198,7 @@ impl Cylindrical {
 
     #[inline]
     pub fn longitude_deg(&self) -> f64 {
-        self.longitude * 180.0 / PI
+        self.longitude.to_degrees()
     }
 }
 
@@ -217,7 +215,7 @@ impl From<Cylindrical> for Rectangular {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::f64::consts::FRAC_PI_2;
+    use std::f64::consts::{FRAC_PI_2, PI};
 
     const EPSILON: f64 = 1e-12;
 

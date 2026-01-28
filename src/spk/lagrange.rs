@@ -4,7 +4,8 @@ use crate::error::{Error, Result};
 use crate::state::State;
 use muad_dib::kernel::spk_types::{Spk8Data, Spk9Data, StateRecord};
 
-/// Lagrange interpolation at a point.
+/// Lagrange interpolation at a point (used in tests).
+#[cfg(test)]
 fn lagrange_interpolate(x_values: &[f64], y_values: &[f64], x: f64) -> f64 {
     let n = x_values.len();
     debug_assert_eq!(n, y_values.len());
@@ -28,6 +29,41 @@ fn lagrange_interpolate(x_values: &[f64], y_values: &[f64], x: f64) -> f64 {
             }
         }
         result += y_values[i] * basis;
+    }
+    result
+}
+
+/// Compute Lagrange basis weights for all data points at evaluation point `x`.
+///
+/// Returns a vector of basis values `L_i(x)` such that the interpolated
+/// value for any component is `sum(y_i * L_i(x))`.
+fn lagrange_basis(x_values: &[f64], x: f64) -> Vec<f64> {
+    let n = x_values.len();
+    let mut basis = vec![1.0; n];
+    for i in 0..n {
+        for j in 0..n {
+            if i != j {
+                let denom = x_values[i] - x_values[j];
+                if denom.abs() > 1e-15 {
+                    basis[i] *= (x - x_values[j]) / denom;
+                }
+            }
+        }
+    }
+    basis
+}
+
+/// Apply precomputed Lagrange basis to interpolate all 6 state components at once.
+fn interpolate_state(states: &[StateRecord], basis: &[f64]) -> [f64; 6] {
+    let mut result = [0.0f64; 6];
+    for (i, s) in states.iter().enumerate() {
+        let w = basis[i];
+        result[0] += s.x * w;
+        result[1] += s.y * w;
+        result[2] += s.z * w;
+        result[3] += s.vx * w;
+        result[4] += s.vy * w;
+        result[5] += s.vz * w;
     }
     result
 }
@@ -172,14 +208,6 @@ fn select_window_type9(data: &Spk9Data, epoch: f64) -> Result<(usize, usize)> {
     Ok((first, first + degree + 1))
 }
 
-fn interpolate_component<F>(states: &[StateRecord], epochs: &[f64], epoch: f64, extractor: F) -> f64
-where
-    F: Fn(&StateRecord) -> f64,
-{
-    let values: Vec<f64> = states.iter().map(&extractor).collect();
-    lagrange_interpolate(epochs, &values, epoch)
-}
-
 /// Evaluate SPK Type 8 (Lagrange, equally spaced).
 pub fn evaluate_type8(data: &Spk8Data, epoch: f64) -> Result<State> {
     let (start_idx, end_idx) = select_window_type8(data, epoch)?;
@@ -189,14 +217,9 @@ pub fn evaluate_type8(data: &Spk8Data, epoch: f64) -> Result<State> {
         .map(|i| data.start_epoch + (i as f64) * data.step_size)
         .collect();
 
-    let x = interpolate_component(window_states, &epochs, epoch, |s| s.x);
-    let y = interpolate_component(window_states, &epochs, epoch, |s| s.y);
-    let z = interpolate_component(window_states, &epochs, epoch, |s| s.z);
-    let vx = interpolate_component(window_states, &epochs, epoch, |s| s.vx);
-    let vy = interpolate_component(window_states, &epochs, epoch, |s| s.vy);
-    let vz = interpolate_component(window_states, &epochs, epoch, |s| s.vz);
-
-    Ok(State::new_raw([x, y, z], [vx, vy, vz]))
+    let basis = lagrange_basis(&epochs, epoch);
+    let c = interpolate_state(window_states, &basis);
+    Ok(State::new_raw([c[0], c[1], c[2]], [c[3], c[4], c[5]]))
 }
 
 /// Evaluate SPK Type 9 (Lagrange, unequally spaced).
@@ -206,14 +229,9 @@ pub fn evaluate_type9(data: &Spk9Data, epoch: f64) -> Result<State> {
 
     let epochs: Vec<f64> = window_states.iter().map(|s| s.epoch).collect();
 
-    let x = interpolate_component(window_states, &epochs, epoch, |s| s.x);
-    let y = interpolate_component(window_states, &epochs, epoch, |s| s.y);
-    let z = interpolate_component(window_states, &epochs, epoch, |s| s.z);
-    let vx = interpolate_component(window_states, &epochs, epoch, |s| s.vx);
-    let vy = interpolate_component(window_states, &epochs, epoch, |s| s.vy);
-    let vz = interpolate_component(window_states, &epochs, epoch, |s| s.vz);
-
-    Ok(State::new_raw([x, y, z], [vx, vy, vz]))
+    let basis = lagrange_basis(&epochs, epoch);
+    let c = interpolate_state(window_states, &basis);
+    Ok(State::new_raw([c[0], c[1], c[2]], [c[3], c[4], c[5]]))
 }
 
 #[cfg(test)]

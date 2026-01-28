@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  // State contains:");
         println!("  //   target:   NaifId      // Body this state describes");
         println!("  //   center:   NaifId      // Origin of coordinates");
-        println!("  //   frame:    i32         // Reference frame (e.g., 1 = J2000)");
+        println!("  //   frame:    FrameId     // Reference frame (e.g., J2000 = 1)");
         println!("  //   position: [f64; 3]    // km");
         println!("  //   velocity: [f64; 3]    // km/s");
 

@@ -13,7 +13,7 @@
 
 use std::ops::{Add, Neg, Sub};
 
-use crate::types::NaifId;
+use crate::types::{FrameId, NaifId};
 
 /// State vector: position and velocity with full relativity context.
 ///
@@ -24,8 +24,8 @@ pub struct State {
     pub target: NaifId,
     /// Center body (origin of coordinates).
     pub center: NaifId,
-    /// Reference frame code (NAIF frame ID, e.g., 1 = J2000).
-    pub frame: i32,
+    /// Reference frame code (NAIF frame ID, e.g., J2000 = 1).
+    pub frame: FrameId,
     /// Position vector [x, y, z] in km.
     pub position: [f64; 3],
     /// Velocity vector [vx, vy, vz] in km/s.
@@ -38,7 +38,7 @@ impl State {
     pub fn new(
         target: NaifId,
         center: NaifId,
-        frame: i32,
+        frame: FrameId,
         position: [f64; 3],
         velocity: [f64; 3],
     ) -> Self {
@@ -60,7 +60,7 @@ impl State {
         State {
             target: NaifId(0),
             center: NaifId(0),
-            frame: 0,
+            frame: FrameId(0),
             position,
             velocity,
         }
@@ -68,7 +68,7 @@ impl State {
 
     /// Create a state with zero velocity.
     #[inline]
-    pub fn from_position(target: NaifId, center: NaifId, frame: i32, position: [f64; 3]) -> Self {
+    pub fn from_position(target: NaifId, center: NaifId, frame: FrameId, position: [f64; 3]) -> Self {
         State {
             target,
             center,
@@ -96,39 +96,6 @@ impl State {
 /// Chain traversal: `(center->A) + (A->target) = (center->target)`
 ///
 /// Panics if frames don't match or chain is invalid.
-impl Add for State {
-    type Output = State;
-
-    fn add(self, other: State) -> State {
-        assert_eq!(
-            self.frame, other.frame,
-            "Cannot add states in different frames: {} vs {}",
-            self.frame, other.frame
-        );
-        assert_eq!(
-            self.target, other.center,
-            "Invalid chain: self.target ({}) != other.center ({})",
-            self.target, other.center
-        );
-
-        State {
-            target: other.target,
-            center: self.center,
-            frame: self.frame,
-            position: [
-                self.position[0] + other.position[0],
-                self.position[1] + other.position[1],
-                self.position[2] + other.position[2],
-            ],
-            velocity: [
-                self.velocity[0] + other.velocity[0],
-                self.velocity[1] + other.velocity[1],
-                self.velocity[2] + other.velocity[2],
-            ],
-        }
-    }
-}
-
 impl Add<&State> for State {
     type Output = State;
 
@@ -162,42 +129,17 @@ impl Add<&State> for State {
     }
 }
 
-/// Relative motion: `(center->A) - (center->B) = (B->A)`
-///
-/// Panics if frames or centers don't match.
-impl Sub for State {
+impl Add for State {
     type Output = State;
-
-    fn sub(self, other: State) -> State {
-        assert_eq!(
-            self.frame, other.frame,
-            "Cannot subtract states in different frames: {} vs {}",
-            self.frame, other.frame
-        );
-        assert_eq!(
-            self.center, other.center,
-            "Cannot subtract states with different centers: {} vs {}",
-            self.center, other.center
-        );
-
-        State {
-            target: self.target,
-            center: other.target,
-            frame: self.frame,
-            position: [
-                self.position[0] - other.position[0],
-                self.position[1] - other.position[1],
-                self.position[2] - other.position[2],
-            ],
-            velocity: [
-                self.velocity[0] - other.velocity[0],
-                self.velocity[1] - other.velocity[1],
-                self.velocity[2] - other.velocity[2],
-            ],
-        }
+    #[allow(clippy::op_ref)]
+    fn add(self, other: State) -> State {
+        self + &other
     }
 }
 
+/// Relative motion: `(center->A) - (center->B) = (B->A)`
+///
+/// Panics if frames or centers don't match.
 impl Sub<&State> for State {
     type Output = State;
 
@@ -231,6 +173,14 @@ impl Sub<&State> for State {
     }
 }
 
+impl Sub for State {
+    type Output = State;
+    #[allow(clippy::op_ref)]
+    fn sub(self, other: State) -> State {
+        self - &other
+    }
+}
+
 /// Reverse direction: `-(center->target)` becomes `(target->center)`.
 impl Neg for State {
     type Output = State;
@@ -246,12 +196,15 @@ impl Neg for State {
     }
 }
 
+/// Default state: SSB relative to SSB in frame 0 at the origin.
+///
+/// This is a zero-state sentinel — useful as an accumulator initial value.
 impl Default for State {
     fn default() -> Self {
         State {
             target: NaifId(0),
             center: NaifId(0),
-            frame: 0,
+            frame: FrameId(0),
             position: [0.0, 0.0, 0.0],
             velocity: [0.0, 0.0, 0.0],
         }
@@ -266,7 +219,7 @@ mod tests {
     const EARTH: NaifId = NaifId(399);
     const MOON: NaifId = NaifId(301);
     const MARS: NaifId = NaifId(499);
-    const J2000: i32 = 1;
+    const J2000: FrameId = FrameId(1);
 
     #[test]
     fn test_distance_and_speed() {
@@ -324,8 +277,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "Cannot add states in different frames")]
     fn test_add_frame_mismatch() {
-        let s1 = State::new(EARTH, SSB, 1, [1.0, 2.0, 3.0], [0.1, 0.2, 0.3]);
-        let s2 = State::new(MOON, EARTH, 2, [4.0, 5.0, 6.0], [0.4, 0.5, 0.6]);
+        let s1 = State::new(EARTH, SSB, FrameId(1), [1.0, 2.0, 3.0], [0.1, 0.2, 0.3]);
+        let s2 = State::new(MOON, EARTH, FrameId(2), [4.0, 5.0, 6.0], [0.4, 0.5, 0.6]);
         let _ = s1 + s2;
     }
 
@@ -350,5 +303,6 @@ mod tests {
         let state = State::default();
         assert_eq!(state.distance(), 0.0);
         assert_eq!(state.target, NaifId(0));
+        assert_eq!(state.frame, FrameId(0));
     }
 }

@@ -5,6 +5,11 @@ use std::fmt;
 /// TDB seconds past J2000 epoch.
 ///
 /// J2000 epoch is January 1, 2000, 12:00:00 TDB.
+///
+/// **Note on equality**: `PartialEq` performs exact `f64` comparison. Two epochs
+/// differing by sub-femtosecond amounts will compare as unequal. For tolerance-based
+/// comparison, compare `as_tdb_seconds()` values directly. `Eq` is deliberately
+/// not implemented since `f64` is not `Eq` (NaN != NaN).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct EpochTDB(pub f64);
 
@@ -94,7 +99,31 @@ impl fmt::Display for Sclk {
     }
 }
 
-/// NAIF body/frame identifier.
+/// NAIF reference frame identifier.
+///
+/// Distinguishes frame codes from body IDs at the type level.
+/// Common frames: J2000 (1), ECLIPJ2000 (17), IAU_EARTH (10013).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FrameId(pub i32);
+
+impl FrameId {
+    /// J2000 inertial reference frame.
+    pub const J2000: FrameId = FrameId(1);
+}
+
+impl From<i32> for FrameId {
+    fn from(value: i32) -> Self {
+        FrameId(value)
+    }
+}
+
+impl fmt::Display for FrameId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// NAIF body identifier.
 ///
 /// NAIF IDs follow conventions:
 /// - Planets: x99 (e.g., 399 = Earth)
